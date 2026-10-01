@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quest Coder build map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f6f4ef;--panel:#ffffff;--ink:#1d1f24;--soft:#5d6470;--faint:#9aa0aa;--line:#d9d5cc;--edge:#b9b4aa;
+  --p0:#6f8f72;--p1:#2f6fd6;--p2:#7a4fd0;--p3:#c98a12;--p4:#14897d;--pd:#b5536b;
+  --ready:#e9a400;--crit:#d6452f;--done:#3f9a4a;--prog:#2f6fd6;
+  --band:rgba(0,0,0,.025);--band2:rgba(0,0,0,.05);
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#14161a;--panel:#1d2026;--ink:#eceef2;--soft:#a9b0bb;--faint:#6c737e;--line:#2e333b;--edge:#4a515c;
+  --p0:#86a98a;--p1:#6a9cf0;--p2:#a585ec;--p3:#e3a93a;--p4:#3cb8aa;--pd:#de7b93;
+  --band:rgba(255,255,255,.025);--band2:rgba(255,255,255,.05);
+}}
+:root[data-theme="dark"]{
+  --bg:#14161a;--panel:#1d2026;--ink:#eceef2;--soft:#a9b0bb;--faint:#6c737e;--line:#2e333b;--edge:#4a515c;
+  --p0:#86a98a;--p1:#6a9cf0;--p2:#a585ec;--p3:#e3a93a;--p4:#3cb8aa;--pd:#de7b93;
+  --band:rgba(255,255,255,.025);--band2:rgba(255,255,255,.05);
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Space Grotesk","Segoe UI",system-ui,sans-serif;font-size:16px;line-height:1.45}
+main{max-width:1400px;margin:0 auto;padding:18px 16px 28px}
+h1{font-size:clamp(26px,3.6vw,38px);line-height:1.05;margin:0 0 6px;letter-spacing:-.01em}
+.sub{color:var(--soft);margin:0 0 14px;max-width:80ch}
+code,.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.86em;font-variant-ligatures:none}
+.top{display:flex;flex-wrap:wrap;gap:12px 22px;align-items:center;margin-bottom:12px}
+.stat{display:flex;flex-direction:column}
+.stat b{font-size:22px;line-height:1.1}
+.stat span{font-size:13px;color:var(--soft)}
+.bar{flex:1 1 220px;min-width:200px;height:10px;border-radius:5px;background:var(--line);overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
+button{font-family:inherit;font-size:14px;font-weight:500;color:var(--ink);background:var(--panel);border:1.5px solid var(--line);border-radius:999px;padding:5px 14px;cursor:pointer}
+button[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:var(--bg)}
+button:focus-visible{outline:3px solid var(--p1);outline-offset:2px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--soft);margin:0 0 10px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start}
+@media (max-width:980px){.layout{grid-template-columns:minmax(0,1fr)}}
+.mapwrap{background:var(--panel);border:1.5px solid var(--line);border-radius:14px;overflow:auto;max-height:78vh;position:relative}
+svg{display:block}
+.node{cursor:pointer}
+.node rect.card{transition:opacity .15s,stroke-width .15s}
+.node:focus{outline:none}
+.node:focus-visible rect.card{stroke-width:3}
+.dim{opacity:.22}
+.panel{background:var(--panel);border:1.5px solid var(--line);border-radius:14px;padding:16px;position:sticky;top:12px}
+.panel h2{font-size:20px;line-height:1.2;margin:4px 0 8px}
+.panel .ph{font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.panel p{margin:0 0 10px;color:var(--soft)}
+.panel h3{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin:14px 0 6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:13px;border:1.5px solid var(--line);border-radius:999px;padding:2px 10px;cursor:pointer;background:transparent;color:var(--ink)}
+.chip.done{border-color:var(--done)}
+.statusrow{display:flex;gap:6px;flex-wrap:wrap}
+.pill{font-size:12px;font-weight:700;padding:1px 9px;border-radius:999px;display:inline-block}
+.empty{color:var(--soft)}
+.foot{color:var(--faint);font-size:13px;margin-top:12px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Quest Coder build map</h1>
+  <p class="sub">Every piece of work in the PRD as a dependency graph. Time runs left to right, each band is a phase, and an arrow means "must be done first." Click any card to see what it needs and what it unlocks, and mark your progress as you go. No dates are set in the PRD, so columns show order, not weeks.</p>
+
+  <div class="top">
+    <div class="stat"><b id="sDone">0</b><span>tasks done</span></div>
+    <div class="stat"><b id="sReady">0</b><span>ready to start now</span></div>
+    <div class="stat"><b id="sCrit">0</b><span>steps left on the critical path</span></div>
+    <div class="bar" id="phaseBar" role="img" aria-label="Progress by phase"></div>
+  </div>
+
+  <div class="controls" role="group" aria-label="Highlight">
+    <button id="hlAll" aria-pressed="true">Show everything</button>
+    <button id="hlReady" aria-pressed="false">Highlight ready now</button>
+    <button id="hlCrit" aria-pressed="false">Highlight critical path</button>
+    <button id="reset" style="margin-left:auto">Reset progress</button>
+  </div>
+  <div class="legend" id="legend"></div>
+
+  <div class="layout">
+    <div class="mapwrap" id="mapwrap"><svg id="map" aria-label="Dependency graph of the Quest Coder PRD"></svg></div>
+    <aside class="panel" id="panel" aria-live="polite"></aside>
+  </div>
+</main>
+
+<script>
+const PHASES=[
+ {id:"D",name:"Decisions",color:"var(--pd)"},
+ {id:"P0",name:"Done",color:"var(--p0)"},
+ {id:"P1",name:"Phase 1 · Engine on the server",color:"var(--p1)"},
+ {id:"P2",name:"Phase 2 · Personal MVP",color:"var(--p2)"},
+ {id:"P3",name:"Phase 3 · Reinforcement",color:"var(--p3)"},
+ {id:"P4",name:"Phase 4 · Public launch",color:"var(--p4)"}];
+const N=[
+ {id:"dojo",t:"Timequake Dojo engine (browser)",ph:"P0",k:"task",deps:[],refs:"",d:"Quests, tests, read budgets, and line-by-line replays, all proven in one page. Every server-side piece is ported from here.",init:"done"},
+ {id:"prd",t:"Quest Coder PRD",ph:"P0",k:"task",deps:[],refs:"",d:"The product spec this map is built from.",init:"done"},
+ {id:"stack",t:"Decide the tech stack",ph:"D",k:"decision",deps:["prd"],refs:"Open questions",d:"Is the stack open, or should it match what you already use (React, TypeScript, Postgres)? Blocks the sandbox runner and the schema."},
+ {id:"library",t:"Pick the first library",ph:"D",k:"decision",deps:["prd"],refs:"Open questions",d:"Which questions go in first, and whether to follow the NeetCode 150 order. Blocks writing the first packs."},
+ {id:"review",t:"Set review intervals",ph:"D",k:"decision",deps:["prd"],refs:"Review system",d:"How often surprise battles appear, and the spaced-repetition intervals for stale reviews."},
+ {id:"rewards",t:"Design the reward system",ph:"D",k:"decision",deps:["prd"],refs:"Goals (deferred)",d:"Gold, EXP, items, or something else, and what players can spend it on."},
+ {id:"name",t:"Choose the app's name",ph:"D",k:"decision",deps:["prd"],refs:"Open questions",d:"\"Quest Coder\" is a placeholder. Needed before the public launch."},
+ {id:"timeline",t:"Define the timeline format",ph:"P1",k:"task",deps:["dojo","prd"],refs:"R10 · Architecture",d:"The contract between sandbox and scenes: each step records the line, tracked variables, reads, and data moves. Scenes only consume timelines."},
+ {id:"sandbox",t:"Sandbox runner",ph:"P1",k:"task",deps:["stack"],refs:"R6, R9",d:"An isolated container per run, with no network, a read-only filesystem, and CPU, memory, and time limits."},
+ {id:"results",t:"Four result types",ph:"P1",k:"task",deps:["sandbox"],refs:"R7",d:"Didn't compile, crashed, failed a test, and passed, each reported clearly with the line number."},
+ {id:"reads",t:"Read counting in the sandbox",ph:"P1",k:"task",deps:["sandbox"],refs:"R8",d:"Wrap inputs in counting objects so complexity budgets are exact, as in the dojo."},
+ {id:"trace",t:"Line tracing with sys.settrace",ph:"P1",k:"task",deps:["sandbox","timeline"],refs:"R10",d:"Record each executed line and the tracked variables (l, r, mid, node, and so on) from real Python frames."},
+ {id:"twopass",t:"Two-pass runs",ph:"P1",k:"task",deps:["reads","trace"],refs:"R6 · Architecture",d:"Run tests untraced for a fast pass or fail, then trace only the tests being replayed, so tracing never causes a timeout."},
+ {id:"player",t:"Port the replay player and scenes",ph:"P1",k:"task",deps:["timeline","stack"],refs:"R10, R11",d:"Bring the dojo's replay theater to the web app: scene, hero, markers, rock meter, code panel, and playback controls."},
+ {id:"packfmt",t:"Quest pack format",ph:"P1",k:"task",deps:["prd","stack"],refs:"R18 · Quest packs",d:"The schema for a pack: metadata, story, 2 to 8 quests, tests and generators, budgets, boss, scene spec, and review set."},
+ {id:"tqpack",t:"Timequake quest pack",ph:"P1",k:"task",deps:["packfmt"],refs:"Quest packs",d:"Convert Search in Rotated Sorted Array into the first real pack."},
+ {id:"g1",t:"Gate: Timequake boss on server",ph:"P1",k:"gate",deps:["twopass","results","player","tqpack"],refs:"Roadmap",d:"The Timequake boss runs in the server sandbox with the same replays as the dojo."},
+ {id:"schema",t:"Postgres schema",ph:"P2",k:"task",deps:["packfmt","stack"],refs:"Data model",d:"Content tables (categories, questions, quests, test_cases, review_variants) and player tables (users, progress, attempts, stats, battles)."},
+ {id:"auth",t:"Accounts and login",ph:"P2",k:"task",deps:["schema"],refs:"R1",d:"Sign up, log in, and log out, with sessions that persist across devices."},
+ {id:"validator",t:"Pack validator and loader",ph:"P2",k:"task",deps:["schema","twopass"],refs:"R18, R19",d:"Run every reference solution in the sandbox, render every scene, and only then load the pack."},
+ {id:"api",t:"API server",ph:"P2",k:"task",deps:["auth","g1"],refs:"R6, R13",d:"Runs, saved code, attempts, and progress, with each run queued for a sandbox."},
+ {id:"editor",t:"Code editor",ph:"P2",k:"task",deps:["g1"],refs:"R5",d:"Line numbers, auto-indent, Tab and Shift+Tab, a run shortcut, and ligatures off."},
+ {id:"libui",t:"Library by category",ph:"P2",k:"task",deps:["api"],refs:"R2, R3",d:"Browse questions by category, with each question's story intro, quest count, difficulty, and status."},
+ {id:"questflow",t:"Quest flow",ph:"P2",k:"task",deps:["api","editor"],refs:"R4, R14",d:"Quests unlock in order, hints are questions, and the reference solution stays hidden until requested."},
+ {id:"boss",t:"Boss fight and victory replay",ph:"P2",k:"task",deps:["questflow","player"],refs:"R12 · Boss fight",d:"Each test is a round, then the victory replay walks through the solution. Must meet the visual bar."},
+ {id:"portal",t:"Linked-list portal scene",ph:"P2",k:"task",deps:["player"],refs:"Boss fight and replay",d:"Nodes as islands or maps joined by portals, with pointer markers that travel and relinks that animate."},
+ {id:"packs",t:"First linked-list packs",ph:"P2",k:"task",deps:["validator","portal","library"],refs:"Roadmap",d:"Reverse Linked List, Merge Two Sorted Lists, and Linked List Cycle, the questions already worked through in chat."},
+ {id:"g2",t:"Gate: 5 questions cleared",ph:"P2",k:"gate",deps:["libui","boss","packs"],refs:"Roadmap",d:"You clear 5 questions end to end in the app."},
+ {id:"stale",t:"Stale reviews",ph:"P3",k:"task",deps:["g2","review"],refs:"R15",d:"Spaced repetition: easy wins come back later, losses and hint-heavy wins come back sooner."},
+ {id:"variants",t:"Review variants in packs",ph:"P3",k:"task",deps:["g2"],refs:"Quest packs",d:"Short variants so reviews and surprise battles aren't word-for-word repeats."},
+ {id:"surprise",t:"Surprise battles",ph:"P3",k:"task",deps:["stale","variants"],refs:"R16",d:"Unannounced fights against new questions in topics you've studied."},
+ {id:"stats",t:"Topic stats",ph:"P3",k:"task",deps:["g2"],refs:"R17",d:"Questions defeated, attempts, hint and solution use, streaks, and a rating per topic."},
+ {id:"scenes",t:"Stack, tree, and graph scenes",ph:"P3",k:"task",deps:["g2"],refs:"Roadmap",d:"More reusable scene renderers, so new packs mostly reuse an existing scene."},
+ {id:"harden",t:"Sandbox hardening and security review",ph:"P3",k:"task",deps:["g2"],refs:"Risks",d:"Make the sandbox safe for strangers' code before anyone else can sign up."},
+ {id:"original",t:"Original problem text for every pack",ph:"P3",k:"task",deps:["g2"],refs:"Risks · Non-goals",d:"Retell every problem in the app's own words and story; reference problems only by name and number."},
+ {id:"g3",t:"Gate: security and original text",ph:"P3",k:"gate",deps:["surprise","stats","scenes","harden","original"],refs:"Roadmap",d:"The sandbox security review passes and every problem text is original."},
+ {id:"ratelimit",t:"Rate limits and abuse protection",ph:"P4",k:"task",deps:["g3"],refs:"R20",d:"Protect the sandbox and the API from overuse and abuse."},
+ {id:"signup",t:"Public sign-up at scale",ph:"P4",k:"task",deps:["g3","name"],refs:"Users and rollout",d:"Accounts and onboarding that hold up for many players."},
+ {id:"launch",t:"Public launch",ph:"P4",k:"gate",deps:["ratelimit","signup"],refs:"Roadmap",d:"Quest Coder opens to other interview-prep learners."},
+ {id:"rewardsb",t:"Build rewards",ph:"P4",k:"task",deps:["launch","rewards"],refs:"R21",d:"Small rewards per quest and a bigger one per boss."},
+ {id:"social",t:"Stat bar and friend list",ph:"P4",k:"task",deps:["launch"],refs:"R22",d:"The deferred social features."}
+];
+const byId=Object.fromEntries(N.map(n=>[n.id,n]));
+N.forEach(n=>n.out=[]);N.forEach(n=>n.deps.forEach(d=>byId[d].out.push(n.id)));
+
+/* status */
+const store={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let ST=store.get("qc-map-status",{});
+const status=id=>ST[id]||byId[id].init||"todo";
+const isDone=id=>status(id)==="done";
+const isReady=id=>!isDone(id)&&byId[id].deps.every(isDone);
+
+/* layout */
+const depthMemo={};function depth(id){if(id in depthMemo)return depthMemo[id];const n=byId[id];return depthMemo[id]=n.deps.length?Math.max(...n.deps.map(depth))+1:0}
+N.forEach(n=>n.col=depth(n.id));
+N.filter(n=>n.k==="decision").forEach(n=>{const outs=n.out.map(o=>byId[o].col);if(outs.length){const lo=n.deps.length?Math.max(...n.deps.map(d=>byId[d].col))+1:0;n.col=Math.max(lo,Math.min(...outs)-1)}});
+const COLS=Math.max(...N.map(n=>n.col))+1;
+const CW=214,NW=186,NH=58,GAPY=14,LPAD=14,LEFT=128,TOPH=34;
+const lanes=PHASES.map(p=>({...p,cells:{}}));const laneOf=Object.fromEntries(lanes.map(l=>[l.id,l]));
+N.forEach(n=>{const c=laneOf[n.ph].cells;(c[n.col]=c[n.col]||[]).push(n)});
+let y=TOPH;lanes.forEach(l=>{const maxStack=Math.max(1,...Object.values(l.cells).map(a=>a.length));l.y=y;l.h=LPAD*2+maxStack*NH+(maxStack-1)*GAPY;y+=l.h});
+const H=y+10,W=LEFT+COLS*CW+20;
+for(let c=0;c<COLS;c++){lanes.forEach(l=>{const cell=l.cells[c];if(!cell)return;
+  cell.forEach(n=>{const ys=n.deps.map(d=>byId[d].cy).filter(v=>v!=null);n.bc=ys.length?ys.reduce((a,b)=>a+b,0)/ys.length:l.y});
+  cell.sort((a,b)=>a.bc-b.bc);
+  const tot=cell.length*NH+(cell.length-1)*GAPY;const start=l.y+(l.h-tot)/2;
+  cell.forEach((n,i)=>{n.x=LEFT+c*CW+(CW-NW)/2;n.y=start+i*(NH+GAPY);n.cy=n.y+NH/2})})}
+
+/* critical path: longest chain of unfinished nodes ending at launch */
+function critical(){const memo={},prev={};const L=id=>{if(id in memo)return memo[id];const n=byId[id];let best=0,bp=null;n.deps.forEach(d=>{const v=L(d);if(v>best){best=v;bp=d}});prev[id]=bp;return memo[id]=best+(isDone(id)?0:1)};
+  const len=L("launch");const path=[];let cur="launch";while(cur){path.push(cur);cur=prev[cur]&&L(prev[cur])>0?prev[cur]:null}return{len,set:new Set(path)}}
+
+/* drawing */
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function wrap(t,max){const w=t.split(" ");const lines=[""];w.forEach(x=>{const cur=lines[lines.length-1];if((cur+" "+x).trim().length>max&&cur)lines.push(x);else lines[lines.length-1]=(cur+" "+x).trim()});if(lines.length>2){lines[1]=lines.slice(1).join(" ");if(lines[1].length>max)lines[1]=lines[1].slice(0,max-1)+"…";lines.length=2}return lines}
+function wrap3(t,max){const w=t.split(" ");const lines=[""];w.forEach(x=>{const cur=lines[lines.length-1];if((cur+" "+x).trim().length>max&&cur)lines.push(x);else lines[lines.length-1]=(cur+" "+x).trim()});return lines.slice(0,3)}
+let sel=store.get("qc-map-sel","g1");if(!byId[sel])sel="g1";let mode="all",hover=null;
+function upstream(id,s=new Set()){byId[id].deps.forEach(d=>{if(!s.has(d)){s.add(d);upstream(d,s)}});return s}
+function downstream(id,s=new Set()){byId[id].out.forEach(d=>{if(!s.has(d)){s.add(d);downstream(d,s)}});return s}
+
+function draw(){
+  const crit=critical();const focus=hover||null;let lit=null;
+  if(focus){lit=new Set([focus,...upstream(focus),...downstream(focus)])}
+  else if(mode==="ready"){lit=new Set(N.filter(n=>isReady(n.id)).map(n=>n.id))}
+  else if(mode==="crit"){lit=crit.set}
+  const phColor=id=>laneOf[byId[id].ph].color;
+  let h=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  h+=`<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--edge)"/></marker><marker id="ahc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--crit)"/></marker><pattern id="stripe" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="transparent"/><rect width="3" height="8" fill="var(--prog)" opacity=".14"/></pattern></defs>`;
+  lanes.forEach((l,i)=>{h+=`<rect x="0" y="${l.y}" width="${W}" height="${l.h}" fill="${i%2?"var(--band2)":"var(--band)"}"/><rect x="0" y="${l.y}" width="5" height="${l.h}" fill="${l.color}"/>`;
+    const parts=l.name.split(" · ");const sub=parts[1]?wrap3(parts[1],15):[];const total=1+sub.length;const y0=l.y+l.h/2-((total-1)*8);
+    h+=`<text x="14" y="${y0+4}" font-size="13.5" font-weight="700" fill="${l.color}">${esc(parts[0])}</text>`+sub.map((w,j)=>`<text x="14" y="${y0+4+(j+1)*16}" font-size="12" fill="var(--soft)">${esc(w)}</text>`).join("")});
+  for(let c=0;c<COLS;c++)h+=`<text x="${LEFT+c*CW+CW/2}" y="22" text-anchor="middle" font-size="12" fill="var(--faint)" font-family="JetBrains Mono, monospace">step ${c+1}</text>`;
+  h+=`<text x="${W-14}" y="22" text-anchor="end" font-size="12" fill="var(--faint)"></text>`;
+  // edges
+  N.forEach(n=>n.deps.forEach(d=>{const a=byId[d];const x1=a.x+NW,y1=a.cy,x2=n.x-4,y2=n.cy;const mx=(x1+x2)/2;
+    const onCrit=mode==="crit"&&!focus&&crit.set.has(n.id)&&crit.set.has(d);const on=!lit||(lit.has(n.id)&&lit.has(d));
+    h+=`<path d="M${x1} ${y1}C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}" fill="none" stroke="${onCrit?"var(--crit)":"var(--edge)"}" stroke-width="${onCrit?2.5:1.4}" marker-end="url(#${onCrit?"ahc":"ah"})" class="${on?"":"dim"}"/>`}));
+  // nodes
+  N.forEach(n=>{const s=status(n.id),ready=isReady(n.id),on=!lit||lit.has(n.id);const col=phColor(n.id);
+    const fill=s==="done"?"var(--panel)":s==="doing"?"url(#stripe)":"var(--panel)";
+    const dash=n.k==="gate"?'stroke-dasharray="6 4"':n.k==="decision"?'stroke-dasharray="2 3"':"";
+    const inCrit=mode==="crit"&&!focus&&crit.set.has(n.id)&&!isDone(n.id);const sw=sel===n.id?3:inCrit||ready?2.4:1.6;const stroke=sel===n.id?"var(--ink)":inCrit?"var(--crit)":ready?"var(--ready)":col;
+    const lines=wrap(n.t,19);
+    h+=`<g class="node ${on?"":"dim"}" data-id="${n.id}" tabindex="0" role="button" aria-label="${esc(n.t)}, ${s==="done"?"done":s==="doing"?"in progress":ready?"ready to start":"blocked"}">`;
+    h+=`<rect class="card" x="${n.x}" y="${n.y}" width="${NW}" height="${NH}" rx="${n.k==="gate"?4:10}" fill="var(--panel)" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`;
+    if(s==="doing")h+=`<rect x="${n.x}" y="${n.y}" width="${NW}" height="${NH}" rx="10" fill="url(#stripe)"/>`;
+    h+=`<rect x="${n.x}" y="${n.y+8}" width="4" height="${NH-16}" rx="2" fill="${col}"/>`;
+    const icon=s==="done"?`<circle cx="${n.x+NW-14}" cy="${n.y+14}" r="8" fill="var(--done)"/><path d="M${n.x+NW-18} ${n.y+14}l3 3l5 -6" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/>`:n.k==="gate"?`<path d="M${n.x+NW-14} ${n.y+6}l8 8l-8 8l-8 -8z" fill="none" stroke="${col}" stroke-width="1.6"/>`:n.k==="decision"?`<text x="${n.x+NW-14}" y="${n.y+19}" text-anchor="middle" font-size="14" font-weight="700" fill="${col}">?</text>`:ready?`<circle cx="${n.x+NW-14}" cy="${n.y+14}" r="5" fill="var(--ready)"/>`:"";
+    h+=icon;
+    h+=lines.map((L,j)=>`<text x="${n.x+14}" y="${n.y+(lines.length===1?33:25+j*17)}" font-size="13.5" font-weight="${n.k==="gate"?700:500}" fill="${s==="done"?"var(--soft)":"var(--ink)"}">${esc(L)}</text>`).join("");
+    h+=`</g>`});
+  h+="</svg>";
+  document.getElementById("map").outerHTML=h;
+  const ns=document.querySelector("#mapwrap svg");ns.id="map";ns.setAttribute("aria-label","Dependency graph of the Quest Coder PRD");
+  ns.querySelectorAll(".node").forEach(g=>{const id=g.dataset.id;
+    g.addEventListener("click",()=>{select(id)});
+    g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select(id)}});
+    g.addEventListener("mouseenter",()=>{hover=id;redraw()});g.addEventListener("mouseleave",()=>{hover=null;redraw()})});
+  stats(crit)}
+let raf=null;function redraw(){if(raf)return;raf=requestAnimationFrame(()=>{raf=null;const sc=document.getElementById("mapwrap");const sx=sc.scrollLeft,sy=sc.scrollTop;const f=document.activeElement&&document.activeElement.dataset?document.activeElement.dataset.id:null;draw();sc.scrollLeft=sx;sc.scrollTop=sy;if(f){const el=document.querySelector(`.node[data-id="${f}"]`);if(el)el.focus({preventScroll:true})}})}
+
+function stats(crit){const tasks=N;const done=tasks.filter(n=>isDone(n.id)).length;
+  document.getElementById("sDone").textContent=`${done} / ${tasks.length}`;
+  document.getElementById("sReady").textContent=N.filter(n=>isReady(n.id)).length;
+  document.getElementById("sCrit").textContent=crit.len;
+  document.getElementById("phaseBar").innerHTML=PHASES.map(p=>{const items=N.filter(n=>n.ph===p.id);const d=items.filter(n=>isDone(n.id)).length;return `<i style="width:${d/N.length*100}%;background:${p.color}" title="${esc(p.name)}: ${d} of ${items.length}"></i>`}).join("")}
+
+function select(id){sel=id;store.set("qc-map-sel",id);renderPanel();redraw()}
+function setStatus(id,s){if(s===(byId[id].init||"todo"))delete ST[id];else ST[id]=s;store.set("qc-map-status",ST);renderPanel();redraw()}
+function renderPanel(){const n=byId[sel];const ph=laneOf[n.ph];const s=status(n.id);const ready=isReady(n.id);
+  const kind=n.k==="gate"?"Milestone gate":n.k==="decision"?"Decision":"Task";
+  const st=s==="done"?["Done","var(--done)"]:s==="doing"?["In progress","var(--prog)"]:ready?["Ready to start","var(--ready)"]:["Blocked","var(--faint)"];
+  const blockers=n.deps.filter(d=>!isDone(d));
+  const chip=id=>`<button class="chip ${isDone(id)?"done":""}" data-go="${id}">${isDone(id)?"✓ ":""}${esc(byId[id].t)}</button>`;
+  document.getElementById("panel").innerHTML=`<div class="ph" style="color:${ph.color}">${esc(ph.name)} · ${kind}</div><h2>${esc(n.t)}</h2>
+   <p>${esc(n.d)}</p>${n.refs?`<p style="font-size:14px">PRD: <b style="color:var(--ink);font-weight:500">${esc(n.refs)}</b></p>`:""}
+   <div class="statusrow" style="align-items:center;margin-bottom:6px"><span class="pill" style="background:${st[1]};color:#fff">${st[0]}</span></div>
+   <div class="statusrow" role="group" aria-label="Set status">${[["todo","To do"],["doing","In progress"],["done","Done"]].map(([k,l])=>`<button data-st="${k}" aria-pressed="${s===k}">${l}</button>`).join("")}</div>
+   <h3>Needs first (${n.deps.length})</h3><div class="chips">${n.deps.length?n.deps.map(chip).join(""):'<span class="empty">Nothing. It can start any time.</span>'}</div>
+   ${blockers.length&&s!=="done"?`<p class="foot">Still waiting on ${blockers.length} item${blockers.length>1?"s":""}.</p>`:""}
+   <h3>Unlocks (${n.out.length})</h3><div class="chips">${n.out.length?n.out.map(chip).join(""):'<span class="empty">Nothing after this.</span>'}</div>
+   <p class="foot">Hover a card to trace everything it depends on and everything it unblocks.</p>`;
+  document.querySelectorAll("#panel [data-go]").forEach(b=>b.onclick=()=>{select(b.dataset.go);const el=document.querySelector(`.node[data-id="${b.dataset.go}"]`);if(el)el.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"})});
+  document.querySelectorAll("#panel [data-st]").forEach(b=>b.onclick=()=>setStatus(sel,b.dataset.st))}
+
+/* legend + controls */
+document.getElementById("legend").innerHTML=PHASES.map(p=>`<span><i class="sw" style="background:${p.color}"></i>${esc(p.name)}</span>`).join("")+
+ `<span><i class="sw" style="border:2px solid var(--ready)"></i>Ready to start</span><span><i class="sw" style="background:var(--done)"></i>Done</span><span>Dashed = milestone gate · Dotted = decision</span>`;
+function setMode(m){mode=m;["hlAll","hlReady","hlCrit"].forEach(id=>document.getElementById(id).setAttribute("aria-pressed",String({hlAll:"all",hlReady:"ready",hlCrit:"crit"}[id]===m)));redraw()}
+document.getElementById("hlAll").onclick=()=>setMode("all");
+document.getElementById("hlReady").onclick=()=>setMode("ready");
+document.getElementById("hlCrit").onclick=()=>setMode("crit");
+document.getElementById("reset").onclick=()=>{ST={};store.set("qc-map-status",ST);renderPanel();redraw()};
+draw();renderPanel();
+</script>
+</body>
+</html>
