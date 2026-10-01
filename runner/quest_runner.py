@@ -6,6 +6,7 @@ classification, read budgets, tracing, two-pass execution, and guard shape.
 
 from __future__ import annotations
 
+import ast
 import copy
 import math
 import resource
@@ -18,6 +19,8 @@ from types import FrameType
 from typing import Any, Callable, Dict, Iterable, List as PyList, Optional
 
 USER_FILENAME = "<quest-user>"
+BLOCKED_SOURCE_NAMES = {"open", "eval", "exec", "compile", "input", "globals", "locals", "vars", "dir", "getattr", "setattr", "delattr", "__import__"}
+BLOCKED_ATTRIBUTE_ROOTS = {"os", "sys", "socket", "subprocess", "pathlib", "shutil"}
 TRACKED_NAMES = {
     "l",
     "left",
@@ -284,7 +287,38 @@ def guarded_call(fn: Callable[[], Any], timeout_ms: int) -> Any:
         signal.signal(signal.SIGALRM, old_handler)
 
 
+def validate_public_source(source: str) -> None:
+    """Block public-unsafe Python capabilities before compilation."""
+    if len(source.encode("utf-8")) > 24_000:
+        raise ValueError("source exceeds public size limit")
+    tree = ast.parse(source, filename=USER_FILENAME)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            raise ValueError("imports are disabled in the public runner")
+        if isinstance(node, ast.Name) and node.id in BLOCKED_SOURCE_NAMES:
+            raise ValueError(f"{node.id} is disabled in the public runner")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            raise ValueError("dunder attribute access is disabled in the public runner")
+        if isinstance(node, ast.Name) and node.id in BLOCKED_ATTRIBUTE_ROOTS:
+            raise ValueError(f"{node.id} access is disabled in the public runner")
+
+
+def apply_resource_limits(timeout_ms: int) -> None:
+    """Best-effort per-process CPU and memory guard for local CPython."""
+    cpu_seconds = max(30, math.ceil(timeout_ms / 1000) + 10)
+    try:
+        resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
+    except (ValueError, OSError):
+        pass
+    try:
+        memory_bytes = 256 * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
+    except (ValueError, OSError):
+        pass
+
+
 def build_namespace(source: str) -> Dict[str, Any]:
+    validate_public_source(source)
     namespace: Dict[str, Any] = {
         "List": DummySubscriptable(),
         "Optional": DummySubscriptable(),
@@ -384,6 +418,7 @@ def run_one_case(
     error: Optional[Dict[str, Any]] = None
 
     try:
+        apply_resource_limits(timeout_ms)
         namespace = build_namespace(source)
         fn = resolve_entrypoint(namespace, entrypoint)
         inputs = wrap_inputs(test.get("input", {}), recorder)

@@ -57,6 +57,8 @@ type RunResult = {
   cases: ReplayCase[];
   replay: ReplayCase | null;
   limits: { maxEvents: number; maxDurationMs: number; maxReads?: number };
+  queue?: { activeRuns: number; queuedRuns: number; maxConcurrentRuns: number };
+  security?: { profile: string; network: string; filesystem: string; timelineRetention: string };
 };
 
 type Hint = { id: string; text: string; cost: string };
@@ -354,9 +356,9 @@ export default function Home() {
         <header className="rounded-3xl border border-cyan-300/25 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-950/30">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 6 Review + Reinforcement</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
+              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 7 Public Hardening</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
               <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{activeChallenge.packTitle}</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Spaced boss reviews, surprise battles from studied topics, per-topic stats, and snooze/preview controls now sit on top of the coding dojo loop.</p>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Public beta onboarding now runs through a hardened runner bridge: rate limits, queue visibility, source validation, no-import/no-open execution, CPU/memory/time guards, and compressed timeline retention.</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
               {userName ? (
@@ -369,11 +371,12 @@ export default function Home() {
           <div className="mt-4 grid gap-2 text-sm sm:grid-cols-5">
             <Metric label="Replay case" value={replay?.caseId ?? "none"} />
             <Metric label="Events" value={`${events.length}/${result?.limits.maxEvents ?? 3000}`} />
-            <Metric label="Mode" value={sceneMode} />
+            <Metric label="Queue" value={`${result?.queue?.activeRuns ?? 0}/${result?.queue?.maxConcurrentRuns ?? 2} active`} />
             <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
             <Metric label="Reviews due" value={`${dueReviews.length}`} />
             <Metric label="Library" value={`${PACKS.length} packs / ${CHALLENGES.length} challenges`} />
           </div>
+          <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100"><b>Public signup/onboarding:</b> enter a handle, start with the first unlocked quest, and run code under the public-hardening-v0 profile. Network and filesystem APIs are disabled; timelines retain only capped replay metadata.</div>
         </header>
 
         <div className="grid gap-6 xl:grid-cols-[19rem_minmax(420px,0.9fr)_minmax(520px,1.1fr)]">
