@@ -179,6 +179,7 @@ export default function Home() {
   const [cursor, setCursor] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [recentReward, setRecentReward] = useState<RewardGrant | null>(null);
 
   const storageKey = userName ? `quest-coder:profile:${userName}` : null;
   const replay = result?.replay ?? null;
@@ -217,14 +218,12 @@ export default function Home() {
     writeProgress(storageKey, progress);
   }, [progress, storageKey]);
 
-  const savedActiveCode = progress.savedCode[activeChallenge.id];
-
   useEffect(() => {
-    setCode(savedActiveCode ?? activeChallenge.starterCode);
+    setCode(progress.savedCode[activeChallenge.id] ?? activeChallenge.starterCode);
     setResult(null);
     setCursor(0);
     setPlaying(false);
-  }, [activeChallenge.id, activeChallenge.starterCode, savedActiveCode]);
+  }, [activeChallenge.id]);
 
   useEffect(() => {
     if (!storageKey) return;
@@ -283,6 +282,7 @@ export default function Home() {
     setUserName(null);
     setProgress(EMPTY_PROGRESS);
     setResult(null);
+    setRecentReward(null);
   }
 
   function recordAttempt(runResult: RunResult) {
@@ -307,7 +307,10 @@ export default function Home() {
         cleared: { ...current.cleared, [activeChallenge.id]: current.cleared[activeChallenge.id] || runResult.passed },
         attempts: { ...current.attempts, [activeChallenge.id]: [attempt, ...(current.attempts[activeChallenge.id] ?? [])].slice(0, 15) }
       };
-      if (runResult.passed && !current.cleared[activeChallenge.id]) next.rewards = grantReward(current, activeChallenge, solutionAssisted, hintCount);
+      if (runResult.passed && !current.cleared[activeChallenge.id]) {
+        next.rewards = grantReward(current, activeChallenge, solutionAssisted, hintCount);
+        setRecentReward(next.rewards.grants[0] ?? null);
+      }
       if (activeChallenge.isBoss) next.reviews = scheduleReview(current, activeChallenge, runResult, solutionAssisted, hintCount);
       return next;
     });
@@ -349,6 +352,7 @@ export default function Home() {
     if (challenge) setSelectedPackSlug(challenge.packSlug);
     setActiveId(id);
     setSurface("solve");
+    setRecentReward(null);
   }
 
   function startReview(item: ReviewItem) {
@@ -498,14 +502,19 @@ export default function Home() {
                     <Metric label="Attempts" value={`${activeAttempts.length}`} />
                     <Metric label="Help used" value={`${progress.hintsOpened[activeChallenge.id] ?? 0} hints`} />
                   </div>
-                  <div className="rounded-2xl border border-yellow-300/20 bg-yellow-300/10 p-4 text-sm text-yellow-50">
+                  {recentReward ? <div className={`rounded-2xl border p-4 text-sm ${activeChallenge.isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-50" : "border-yellow-300/30 bg-yellow-300/10 text-yellow-50"}`} role="status" aria-live="polite">
+                    <p className="text-xs uppercase tracking-[0.25em]">{activeChallenge.isBoss ? "Boss victory moment" : "Reward toast"}</p>
+                    <b>{activeChallenge.isBoss ? "Boss cleared." : "Clean clear."} +{recentReward.xp} XP{recentReward.shards ? ` · +${recentReward.shards} Shard` : ""}</b>
+                    <p className="mt-1">{activeChallenge.isBoss ? "Review rematch added to Profile/Campaign. Keep moving when ready." : "Quest unlocked: the next node is ready on the path above."}</p>
+                  </div> : <div className="rounded-2xl border border-yellow-300/20 bg-yellow-300/10 p-4 text-sm text-yellow-50">
                     <b>Companion tip:</b> solve the prompt first. Open Animation only when you want to trace what happened.
-                  </div>
+                  </div>}
                 </div>
               ) : solveTab === "Animation" ? (
                 <div className="space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
                     <OutcomeBadge status={result?.status ?? "internal_error"} passed={result?.passed ?? false} />
+                    <p className="rounded-xl border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs text-slate-300">Reduced motion safe: replay only moves when you press Play/Step.</p>
                     <PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} />
                   </div>
                   <SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} />
@@ -526,6 +535,7 @@ export default function Home() {
               ) : (
                 <div className="space-y-4">
                   <CasesPanel result={result} />
+                  <p className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">Attempt history lives here, not on the workspace front. Review reminders stay in Hub/Profile/Campaign.</p>
                   <AttemptHistory attempts={activeAttempts} />
                 </div>
               )}
@@ -558,7 +568,9 @@ export default function Home() {
                   <StatusPill label={result ? result.status : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />
                 </div>
                 {runError ? <p className="rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}
+                {recentReward ? <div className={`mb-3 rounded-xl border p-3 text-sm ${activeChallenge.isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-50" : "border-yellow-300/30 bg-yellow-300/10 text-yellow-50"}`} role="status" aria-live="polite"><b>{activeChallenge.isBoss ? "Boss victory moment" : "Reward toast"}</b><br />+{recentReward.xp} XP{recentReward.shards ? ` · +${recentReward.shards} Shard` : ""} · {activeChallenge.isBoss ? "review rematch queued" : "next quest unlock animation"}</div> : null}
                 {result ? <CasesPanel result={result} /> : <p className="text-sm text-slate-400">Run your code to see cases here. If it fails, open Animation to trace the timeline.</p>}
+                {result && !result.passed ? <button className="control mt-3" onClick={() => setSolveTab("Animation")}>View Animation</button> : null}
                 {result && !result.passed ? <p className="mt-3 text-xs text-amber-100">Next learning step: open the Animation tab on the left.</p> : null}
               </div>
             </section>
