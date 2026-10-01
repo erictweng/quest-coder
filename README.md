@@ -8,13 +8,26 @@ Quest Coder is a planned web app that turns LeetCode/NeetCode-style problems int
 - PRD extracted summary: `docs/PRD_EXTRACTED_SUMMARY.md`
 - Sprint plan: `docs/SPRINT_PLAN.md`
 - Milestones: `docs/MILESTONES.md`
+- Decisions: `DECISIONS.md`
+- Architecture: `ARCHITECTURE.md`
+- Timeline contract draft: `docs/timeline-format.md`
+- Quest-pack schema draft: `docs/quest-pack-schema.md`
 - Interactive build map: `build-map/quest-coder-build-map.html`
 - Original provided build map: `build-map/original-quest-coder-build-map.html`
 - Coding Dojo skill reference: `skills/coding-dojo.SKILL.md`
 
 ## Current status
 
-Planning repo initialized. No app code exists yet. The next useful action is Sprint 0: decide the product defaults and stack, then create the runnable skeleton.
+Sprint 0 is complete. The repo now has locked MVP decisions, an architecture boundary, contract drafts, and a runnable Next.js skeleton for Sprint 1.
+
+## Development
+
+```bash
+npm install
+npm run typecheck
+npm run build
+npm run dev
+```
 
 ## Discord thread
 
