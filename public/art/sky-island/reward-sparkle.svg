@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" shape-rendering="crispEdges" role="img" aria-label="Original reward sparkle icon">
+  <rect width="24" height="24" fill="none"/>
+  <rect x="10" y="2" width="4" height="6" fill="#ffd166"/>
+  <rect x="10" y="16" width="4" height="6" fill="#ffd166"/>
+  <rect x="2" y="10" width="6" height="4" fill="#ffd166"/>
+  <rect x="16" y="10" width="6" height="4" fill="#ffd166"/>
+  <rect x="8" y="8" width="8" height="8" fill="#fff7d6"/>
+</svg>

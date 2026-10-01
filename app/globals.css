@@ -148,6 +148,18 @@ summary:focus-visible,
   box-shadow: 0 4px 0 color-mix(in srgb, var(--qc-bark) 35%, transparent);
 }
 
+.sky-asset {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  flex: none;
+  filter: drop-shadow(0 6px 0 rgb(7 8 20 / 0.45));
+}
+
+.sky-asset-soft {
+  opacity: 0.82;
+  filter: drop-shadow(0 4px 0 rgb(7 8 20 / 0.22));
+}
+
 .pixel-panel {
   border: 2px solid color-mix(in srgb, var(--qc-border) 24%, transparent);
   background: linear-gradient(180deg, color-mix(in srgb, var(--qc-panel) 92%, transparent), color-mix(in srgb, var(--qc-night) 96%, transparent));
