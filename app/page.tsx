@@ -395,12 +395,12 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#123456_0,#020617_48%,#01030a_100%)] text-slate-100">
+    <main className="pixel-console min-h-screen text-[var(--qc-text)]">
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 lg:px-8">
-        <header className={surface === "solve" ? "rounded-2xl border border-cyan-300/20 bg-slate-950/70 px-4 py-3 shadow-lg shadow-cyan-950/20" : "rounded-3xl border border-cyan-300/25 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-950/30"}>
+        <header className={surface === "solve" ? "pixel-panel rounded-2xl px-4 py-3" : "pixel-panel rounded-3xl p-6"}>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 13 Split-Pane Solve</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater Question + code editor Line numbers Open solution scroll {"onSelect={selectChallenge}"}</span>
+              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 15 Pixel Visual Pass</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater Question + code editor Line numbers Open solution scroll {"onSelect={selectChallenge}"}</span>
               {surface === "solve" ? <p className="mt-1 text-sm text-slate-400">Workspace mode: no dashboard chrome. Campaign path lives in the question pane.</p> : <><h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">Choose your path</h1><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">The hub is calm and action-oriented: choose Profile, Campaign, or Questions, then open the compiler only when a quest starts.</p></>}
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
@@ -437,21 +437,21 @@ export default function Home() {
 
         {surface === "hub" ? (
           <section className="space-y-5">
-            <div className="rounded-3xl border border-yellow-300/25 bg-yellow-300/10 p-5 shadow-xl">
-              <div className="flex items-start gap-4"><div className="grid h-14 w-14 place-items-center rounded-2xl border border-yellow-200/50 bg-slate-950 text-2xl">▣</div><div><h2 className="text-xl font-black text-yellow-100">Pixel companion</h2><p className="mt-1 text-slate-200">“Pick a path first. I’ll open the compiler when the quest starts.”</p></div></div>
+            <div className="pixel-dialogue rounded-3xl p-5 shadow-xl">
+              <div className="flex items-start gap-4"><div className="bit-sprite grid h-14 w-14 place-items-center bg-slate-950 text-2xl">▣</div><div><h2 className="text-xl font-black text-yellow-100">Pixel companion</h2><p className="mt-1 text-slate-200">“Pick a path first. I’ll open the compiler when the quest starts.”</p></div></div>
             </div>
             <div className="grid gap-4 lg:grid-cols-3">
-              <button className="rounded-3xl border border-cyan-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-cyan-300/10" onClick={() => setSurface("profile")}>
+              <button className="pixel-panel pixel-button rounded-3xl p-6 text-left shadow-xl hover:bg-cyan-300/10" onClick={() => setSurface("profile")}>
                 <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Profile</p><h2 className="mt-3 text-2xl font-black">Save file</h2><p className="mt-2 text-sm text-slate-300">XP, Shards, review due count, recent attempts, and solo/social settings.</p><p className="mt-4 text-xs text-cyan-100">{progress.rewards.xp} XP · {progress.rewards.shards} Shards · {dueReviews.length} reviews due</p>
               </button>
-              <button className="rounded-3xl border border-purple-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-purple-300/10" onClick={() => setSurface("campaigns")}>
+              <button className="pixel-panel pixel-button rounded-3xl p-6 text-left shadow-xl hover:bg-purple-300/10" onClick={() => setSurface("campaigns")}>
                 <p className="text-xs uppercase tracking-[0.3em] text-purple-300">Campaign</p><h2 className="mt-3 text-2xl font-black">Quest map</h2><p className="mt-2 text-sm text-slate-300">Pick a topic world before the compiler appears.</p><p className="mt-4 text-xs text-purple-100">{PACKS.length} worlds · {statBar.label}</p>
               </button>
-              <button className="rounded-3xl border border-yellow-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-yellow-300/10" onClick={() => setSurface("questions")}>
+              <button className="pixel-panel pixel-button rounded-3xl p-6 text-left shadow-xl hover:bg-yellow-300/10" onClick={() => setSurface("questions")}>
                 <p className="text-xs uppercase tracking-[0.3em] text-yellow-300">Questions</p><h2 className="mt-3 text-2xl font-black">Quest board</h2><p className="mt-2 text-sm text-slate-300">Choose an available quest, review, or boss fight.</p><p className="mt-4 text-xs text-yellow-100">{CHALLENGES.length} quests and bosses</p>
               </button>
             </div>
-            <button className="w-full rounded-3xl border border-emerald-300/25 bg-emerald-300/10 p-5 text-left shadow-xl" onClick={() => selectChallenge(activeChallenge.id)}><b>Continue Last Quest</b><p className="mt-1 text-sm text-emerald-100">{activeChallenge.title} · opens the focused solve screen</p></button>
+            <button className="pixel-button w-full rounded-3xl border border-emerald-300/25 bg-emerald-300/10 p-5 text-left shadow-xl" onClick={() => selectChallenge(activeChallenge.id)}><b>Continue Last Quest</b><p className="mt-1 text-sm text-emerald-100">{activeChallenge.title} · opens the focused solve screen</p></button>
           </section>
         ) : surface === "profile" ? (
           <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
@@ -467,8 +467,8 @@ export default function Home() {
         ) : surface === "questions" ? (
           <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Questions list</h2><p className="text-sm text-slate-400">Select a question to open the focused solve screen.</p></div><div className="flex flex-wrap gap-2 text-xs">{(["All", "Available", "Cleared", "Review", "Boss"] as QuestionFilter[]).map((filter) => <button key={filter} className={questionFilter === filter ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setQuestionFilter(filter)}>{filter}</button>)}</div></div><div className="grid gap-3 md:grid-cols-2">{CHALLENGES.filter((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); if (questionFilter === "Available") return !locked && !cleared && !challenge.isBoss; if (questionFilter === "Cleared") return cleared; if (questionFilter === "Review") return reviewDue; if (questionFilter === "Boss") return challenge.isBoss; return true; }).map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = cleared ? "cleared" : reviewDue ? "review due" : locked ? "locked" : challenge.isBoss ? "boss" : "available"; return <button key={challenge.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:border-cyan-300" onClick={() => selectChallenge(challenge.id)}><b>{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</b><p className="mt-1 text-xs text-slate-400">{challenge.packTitle} · {(progress.attempts[challenge.id] ?? []).length} attempts</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={cleared ? "green" : reviewDue ? "purple" : locked ? "muted" : challenge.isBoss ? "pink" : "cyan"} />{challenge.packConcepts.slice(0, 2).map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></button>; })}</div></section>
         ) : (
-          <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]" aria-label="Focused split-pane solve screen">
-            <aside className="rounded-3xl border border-cyan-300/20 bg-slate-950/85 p-5 shadow-xl shadow-cyan-950/20">
+          <section className="solve-split grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]" aria-label="Focused split-pane solve screen">
+            <aside className="pixel-panel rounded-3xl p-5 shadow-xl shadow-cyan-950/20">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Focused question pane</p>
@@ -541,7 +541,7 @@ export default function Home() {
               )}
             </aside>
 
-            <section className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 shadow-xl" aria-label="Code compiler pane">
+            <section className="pixel-panel rounded-3xl p-5 shadow-xl" aria-label="Code compiler pane">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.3em] text-emerald-300">Python compiler</p>
@@ -590,7 +590,7 @@ function StatusPill({ label, tone }: { label: string; tone: "cyan" | "gold" | "g
     pink: "border-pink-300/40 bg-pink-300/10 text-pink-100",
     muted: "border-slate-500/40 bg-slate-500/10 text-slate-300"
   };
-  return <span className={`rounded-xl border px-2 py-1 ${tones[tone]}`}>{label}</span>;
+  return <span className={`status-label rounded-xl border px-2 py-1 ${tones[tone]}`}>{label}</span>;
 }
 
 function LibraryPanel({ progress, activeId, onSelect }: { progress: ProgressState; activeId: string; onSelect: (id: string) => void }) {
