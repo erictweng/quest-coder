@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:runner": "python3 -m unittest runner.tests.test_smoke -v"
   },
   "dependencies": {
     "@tailwindcss/postcss": "latest",
