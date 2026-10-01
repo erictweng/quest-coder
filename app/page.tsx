@@ -217,17 +217,18 @@ export default function Home() {
     writeProgress(storageKey, progress);
   }, [progress, storageKey]);
 
+  const savedActiveCode = progress.savedCode[activeChallenge.id];
+
   useEffect(() => {
-    const saved = progress.savedCode[activeChallenge.id];
-    setCode(saved ?? activeChallenge.starterCode);
+    setCode(savedActiveCode ?? activeChallenge.starterCode);
     setResult(null);
     setCursor(0);
     setPlaying(false);
-  }, [activeChallenge, progress.savedCode]);
+  }, [activeChallenge.id, activeChallenge.starterCode, savedActiveCode]);
 
   useEffect(() => {
     if (!storageKey) return;
-    setProgress((current) => ({ ...current, savedCode: { ...current.savedCode, [activeChallenge.id]: code } }));
+    setProgress((current) => current.savedCode[activeChallenge.id] === code ? current : ({ ...current, savedCode: { ...current.savedCode, [activeChallenge.id]: code } }));
   }, [activeChallenge.id, code, storageKey]);
 
   const submit = useCallback(async () => {
@@ -392,12 +393,11 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#123456_0,#020617_48%,#01030a_100%)] text-slate-100">
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 lg:px-8">
-        <header className="rounded-3xl border border-cyan-300/25 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-950/30">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <header className={surface === "solve" ? "rounded-2xl border border-cyan-300/20 bg-slate-950/70 px-4 py-3 shadow-lg shadow-cyan-950/20" : "rounded-3xl border border-cyan-300/25 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-950/30"}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 13 Split-Pane Solve</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater Question + code editor Line numbers Open solution scroll {"onSelect={selectChallenge}"}</span>
-              <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{surface === "solve" ? activeChallenge.packTitle : "Choose your path"}</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">{surface === "solve" ? "Solve mode keeps the problem on the left and the Python compiler on the right. Animation, hints, solution, and submissions stay tucked behind tabs." : "The hub is calm and action-oriented: choose Profile, Campaign, or Questions, then open the compiler only when a quest starts."}</p>
+              {surface === "solve" ? <p className="mt-1 text-sm text-slate-400">Workspace mode: no dashboard chrome. Campaign path lives in the question pane.</p> : <><h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">Choose your path</h1><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">The hub is calm and action-oriented: choose Profile, Campaign, or Questions, then open the compiler only when a quest starts.</p></>}
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
               {userName ? (
@@ -407,25 +407,27 @@ export default function Home() {
               )}
             </div>
           </div>
-          <nav className="mt-5 flex flex-wrap gap-2 text-sm" aria-label="Quest Coder primary surfaces">
-            <button className={surface === "hub" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("hub")}>Hub</button>
-            <button className={surface === "profile" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("profile")}>Profile</button>
-            <button className={surface === "campaigns" || surface === "campaignDetail" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("campaigns")}>Campaign</button>
-            <button className={surface === "questions" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("questions")}>Questions</button>
-            <button className={surface === "solve" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("solve")}>Solve</button>
-          </nav>
-          <div className="mt-4 grid gap-2 text-sm sm:grid-cols-5">
-            <Metric label="Surface" value={surface} />
-            <Metric label="Streak/rating" value={`${topicStats[0]?.streak ?? 0}/${topicStats[0]?.rating ?? 1000}`} />
-            <Metric label="Bosses defeated" value={statBar.label} />
-            <Metric label="Active quest" value={activeChallenge.title} />
-            <Metric label="Queue" value={`${result?.queue?.activeRuns ?? 0}/${result?.queue?.maxConcurrentRuns ?? 2} active`} />
-            <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
-            <Metric label="Reviews due" value={`${dueReviews.length}`} />
-            <Metric label="XP" value={`${progress.rewards.xp}`} />
-            <Metric label="Shards" value={`${progress.rewards.shards}`} />
-          </div>
-          <StatBar stat={statBar} />
+          {surface !== "solve" ? <>
+            <nav className="mt-5 flex flex-wrap gap-2 text-sm" aria-label="Quest Coder primary surfaces">
+              <button className={surface === "hub" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("hub")}>Hub</button>
+              <button className={surface === "profile" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("profile")}>Profile</button>
+              <button className={surface === "campaigns" || surface === "campaignDetail" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("campaigns")}>Campaign</button>
+              <button className={surface === "questions" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("questions")}>Questions</button>
+              <button className="control" onClick={() => setSurface("solve")}>Solve</button>
+            </nav>
+            <div className="mt-4 grid gap-2 text-sm sm:grid-cols-5">
+              <Metric label="Surface" value={surface} />
+              <Metric label="Streak/rating" value={`${topicStats[0]?.streak ?? 0}/${topicStats[0]?.rating ?? 1000}`} />
+              <Metric label="Bosses defeated" value={statBar.label} />
+              <Metric label="Active quest" value={activeChallenge.title} />
+              <Metric label="Queue" value={`${result?.queue?.activeRuns ?? 0}/${result?.queue?.maxConcurrentRuns ?? 2} active`} />
+              <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
+              <Metric label="Reviews due" value={`${dueReviews.length}`} />
+              <Metric label="XP" value={`${progress.rewards.xp}`} />
+              <Metric label="Shards" value={`${progress.rewards.shards}`} />
+            </div>
+            <StatBar stat={statBar} />
+          </> : null}
           <span className="sr-only">Public signup/onboarding enter a handle public-hardening-v0 capped replay metadata</span>
         </header>
 
@@ -467,9 +469,15 @@ export default function Home() {
                 <div>
                   <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Focused question pane</p>
                   <h2 className="mt-2 text-2xl font-black">{activeChallenge.title}</h2>
-                  <p className="mt-1 text-sm text-slate-400">{activeChallenge.packTitle} · {isActiveLocked ? "locked" : activeChallenge.isBoss ? "boss fight" : "available"}</p>
+                  <p className="mt-1 text-sm text-slate-400">{isActiveLocked ? "locked" : activeChallenge.isBoss ? "boss fight" : "available"} · {activeAttempts.length} attempts · {progress.rewards.xp} XP</p>
                 </div>
-                <button className="control" onClick={() => setSurface("campaignDetail")}>Back to map</button>
+                <button className="control" onClick={() => setSurface("campaignDetail")}>Map</button>
+              </div>
+
+              <div className="mb-4 rounded-2xl border border-purple-300/20 bg-purple-300/5 p-3" aria-label="Mini campaign categories and quest path">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="text-xs uppercase tracking-[0.25em] text-purple-200">{activePack.title}</p><span className="text-xs text-slate-400">Quest path</span></div>
+                <div className="flex flex-wrap gap-2">{[...activePack.quests, activePack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isCurrent = challenge.id === activeChallenge.id; const isBoss = challenge.id === activePack.boss.id; return <button key={challenge.id} className={`rounded-xl border px-3 py-2 text-xs font-bold ${isCurrent ? "border-cyan-200 bg-cyan-300 text-slate-950" : cleared ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : locked ? "border-slate-600 bg-slate-800/60 text-slate-400" : isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-100" : "border-white/10 bg-white/5 text-slate-200"}`} onClick={() => selectChallenge(challenge.id)}>{isBoss ? "Boss" : `Q${challenge.order ?? "?"}`}</button>; })}</div>
+                <p className="mt-3 text-xs text-slate-400">{activePack.concepts.join(" · ")}</p>
               </div>
 
               <div className="mb-4 flex flex-wrap gap-2 text-xs" role="tablist" aria-label="Solve support tabs">

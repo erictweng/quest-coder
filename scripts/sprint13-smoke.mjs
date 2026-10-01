@@ -21,9 +21,10 @@ milestone("Sprint 13 roadmap is wired", () => {
 
 milestone("Focused split-pane solve screen exists", () => {
   assert(solveStart > -1, "focused split-pane solve screen missing");
-  for (const token of ["Focused question pane", "Code compiler pane", "Question", "Animation", "Hints", "Solution", "Submissions"]) {
+  for (const token of ["Focused question pane", "Code compiler pane", "Question", "Animation", "Hints", "Solution", "Submissions", "Mini campaign categories and quest path"]) {
     assert(solveSource.includes(token), `solve screen missing ${token}`);
   }
+  assert(page.includes("Workspace mode: no dashboard chrome"), "compact solve header missing");
 });
 
 milestone("Question left and compiler right are explicit", () => {
