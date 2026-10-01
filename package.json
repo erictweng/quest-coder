@@ -16,7 +16,8 @@
     "smoke:sprint6": "node scripts/sprint6-smoke.mjs",
     "smoke:sprint7": "node scripts/sprint7-smoke.mjs",
     "smoke:sprint8": "node scripts/sprint8-smoke.mjs",
-    "smoke:sprint9": "node scripts/sprint9-smoke.mjs"
+    "smoke:sprint9": "node scripts/sprint9-smoke.mjs",
+    "smoke:sprint10": "node scripts/sprint10-smoke.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "latest",

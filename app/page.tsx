@@ -118,6 +118,7 @@ type ReviewRecord = {
 };
 type RewardGrant = { id: string; at: string; challengeId: string; xp: number; shards: number; reason: string };
 type RewardWallet = { xp: number; shards: number; grants: RewardGrant[]; shopPreviewUnlocked: boolean };
+type AppSurface = "hub" | "profile" | "campaigns" | "questions" | "solve";
 type Friend = { id: string; name: string; status: string; rating: number };
 type ProgressState = {
   cleared: Record<string, boolean>;
@@ -163,6 +164,7 @@ export default function Home() {
   const [userNameDraft, setUserNameDraft] = useState("Eric");
   const [userName, setUserName] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState>(EMPTY_PROGRESS);
+  const [surface, setSurface] = useState<AppSurface>("hub");
   const [activeId, setActiveId] = useState(samplePack.quests[0]?.id ?? samplePack.boss.id);
   const activeChallenge = useMemo(() => CHALLENGES.find((challenge) => challenge.id === activeId) ?? CHALLENGES[0], [activeId]);
   const [code, setCode] = useState(activeChallenge.starterCode);
@@ -328,8 +330,13 @@ export default function Home() {
     });
   }
 
+  function selectChallenge(id: string) {
+    setActiveId(id);
+    setSurface("solve");
+  }
+
   function startReview(item: ReviewItem) {
-    setActiveId(item.record.bossId);
+    selectChallenge(item.record.bossId);
     setRunError(`Review preview: ${item.variant?.title ?? "boss replay"}. ${item.variant?.mutation ?? "Run the boss again to reinforce it."}`);
   }
 
@@ -373,9 +380,9 @@ export default function Home() {
         <header className="rounded-3xl border border-cyan-300/25 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-950/30">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 9 Public Beta Launch</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
-              <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{activeChallenge.packTitle}</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Public beta launch readiness is wired: deployment config, health checks, robots/sitemap controls, launch checklist, rollback plan, rewards, and optional social polish.</p>
+              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 10 IA Shell</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
+              <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{surface === "solve" ? activeChallenge.packTitle : "Choose your path"}</h1>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Profile, Campaign, and Questions now form the first-level flow. The full compiler/replay workspace only opens after a question is selected.</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
               {userName ? (
@@ -385,9 +392,16 @@ export default function Home() {
               )}
             </div>
           </div>
+          <nav className="mt-5 flex flex-wrap gap-2 text-sm" aria-label="Quest Coder primary surfaces">
+            <button className={surface === "hub" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("hub")}>Hub</button>
+            <button className={surface === "profile" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("profile")}>Profile</button>
+            <button className={surface === "campaigns" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("campaigns")}>Campaign</button>
+            <button className={surface === "questions" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("questions")}>Questions</button>
+            <button className={surface === "solve" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("solve")}>Solve</button>
+          </nav>
           <div className="mt-4 grid gap-2 text-sm sm:grid-cols-5">
-            <Metric label="Replay case" value={replay?.caseId ?? "none"} />
-            <Metric label="Events" value={`${events.length}/${result?.limits.maxEvents ?? 3000}`} />
+            <Metric label="Surface" value={surface} />
+            <Metric label="Active quest" value={activeChallenge.title} />
             <Metric label="Queue" value={`${result?.queue?.activeRuns ?? 0}/${result?.queue?.maxConcurrentRuns ?? 2} active`} />
             <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
             <Metric label="Reviews due" value={`${dueReviews.length}`} />
@@ -398,57 +412,58 @@ export default function Home() {
           <span className="sr-only">Public signup/onboarding enter a handle public-hardening-v0 capped replay metadata</span>
         </header>
 
-        <div className="grid gap-6 xl:grid-cols-[19rem_minmax(420px,0.9fr)_minmax(520px,1.1fr)]">
-          <div className="space-y-4">
-            <LibraryPanel progress={progress} activeId={activeChallenge.id} onSelect={setActiveId} />
-            <RewardPanel rewards={progress.rewards} onSpend={unlockShopPreview} />
-            <ReviewPanel items={reviewItems} dueCount={dueReviews.length} onPreview={startReview} onSnooze={snoozeReview} onSurprise={startSurprise} />
-            <StatsPanel stats={topicStats} />
-            <FriendPanel enabled={progress.friendsEnabled} onToggle={toggleFriends} friends={FRIEND_SHELL} />
+        {surface === "hub" ? (
+          <section className="grid gap-4 lg:grid-cols-3">
+            <button className="rounded-3xl border border-cyan-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-cyan-300/10" onClick={() => setSurface("profile")}>
+              <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Profile</p><h2 className="mt-3 text-2xl font-black">Save file</h2><p className="mt-2 text-sm text-slate-300">XP, Shards, review due count, recent attempts, and solo/social settings.</p>
+            </button>
+            <button className="rounded-3xl border border-purple-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-purple-300/10" onClick={() => setSurface("campaigns")}>
+              <p className="text-xs uppercase tracking-[0.3em] text-purple-300">Campaign</p><h2 className="mt-3 text-2xl font-black">Quest map</h2><p className="mt-2 text-sm text-slate-300">Pick a topic world before the compiler appears.</p>
+            </button>
+            <button className="rounded-3xl border border-yellow-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-yellow-300/10" onClick={() => setSurface("questions")}>
+              <p className="text-xs uppercase tracking-[0.3em] text-yellow-300">Questions</p><h2 className="mt-3 text-2xl font-black">Quest board</h2><p className="mt-2 text-sm text-slate-300">Choose an available quest, review, or boss fight.</p>
+            </button>
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-5 lg:col-span-2"><h2 className="text-xl font-bold">Companion</h2><p className="mt-2 text-slate-300">“Pick a path first. I’ll open the compiler when the quest starts.”</p></div>
+            <button className="rounded-3xl border border-emerald-300/25 bg-emerald-300/10 p-5 text-left" onClick={() => selectChallenge(activeChallenge.id)}><b>Continue last quest</b><p className="mt-1 text-sm text-emerald-100">{activeChallenge.title}</p></button>
+          </section>
+        ) : surface === "profile" ? (
+          <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+            <div className="rounded-3xl border border-cyan-300/20 bg-slate-950/80 p-5"><h2 className="text-2xl font-black">Profile save file</h2><p className="mt-2 text-slate-300">{userName ?? "Guest"} · {progress.rewards.xp} XP · {progress.rewards.shards} Shards · {dueReviews.length} reviews due</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><Metric label="Bosses defeated" value={statBar.label} /><Metric label="Attempts logged" value={`${Object.values(progress.attempts).flat().length}`} /></div></div>
+            <div className="space-y-4"><RewardPanel rewards={progress.rewards} onSpend={unlockShopPreview} /><FriendPanel enabled={progress.friendsEnabled} onToggle={toggleFriends} friends={FRIEND_SHELL} /></div>
+          </section>
+        ) : surface === "campaigns" ? (
+          <section className="grid gap-4 lg:grid-cols-2">
+            {PACKS.map((pack) => { const cleared = [...pack.quests, pack.boss].filter((challenge) => progress.cleared[challenge.id]).length; const total = pack.quests.length + 1; return <button key={pack.slug} className="rounded-3xl border border-purple-300/20 bg-slate-950/80 p-5 text-left hover:bg-purple-300/10" onClick={() => { setActiveId(pack.quests[0]?.id ?? pack.boss.id); setSurface("questions"); }}><p className="text-xs uppercase tracking-[0.3em] text-purple-300">Campaign</p><h2 className="mt-2 text-2xl font-black">{pack.title}</h2><p className="mt-2 text-sm text-slate-300">{pack.metadata.shortDescription}</p><p className="mt-3 text-sm text-cyan-100">{cleared}/{total} cleared · Boss {pack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]) ? "open" : "locked"}</p></button>; })}
+          </section>
+        ) : surface === "questions" ? (
+          <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Questions list</h2><p className="text-sm text-slate-400">Select a question to open the focused solve screen.</p></div><div className="flex gap-2 text-xs"><span className="control">All</span><span className="control">Available</span><span className="control">Cleared</span><span className="control">Review</span><span className="control">Boss</span></div></div><div className="grid gap-3 md:grid-cols-2">{CHALLENGES.map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); return <button key={challenge.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:border-cyan-300" onClick={() => selectChallenge(challenge.id)}><b>{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</b><p className="mt-1 text-xs text-slate-400">{challenge.packTitle} · {cleared ? "cleared" : locked ? "locked" : "available"} · {(progress.attempts[challenge.id] ?? []).length} attempts</p></button>; })}</div></section>
+        ) : (
+          <div className="grid gap-6 xl:grid-cols-[19rem_minmax(420px,0.9fr)_minmax(520px,1.1fr)]">
+            <div className="space-y-4">
+              <LibraryPanel progress={progress} activeId={activeChallenge.id} onSelect={selectChallenge} />
+              <ReviewPanel items={reviewItems} dueCount={dueReviews.length} onPreview={startReview} onSnooze={snoozeReview} onSurprise={startSurprise} />
+              <StatsPanel stats={topicStats} />
+            </div>
+
+            <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-4 shadow-xl">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div><h2 className="text-xl font-bold">Question + code editor</h2><p className="text-sm text-slate-400">Line numbers, Tab/Shift+Tab, auto-indent, and Ctrl/Cmd+Enter are wired. Ligatures are disabled.</p><p className="mt-1 text-xs text-slate-500">{activeChallenge.title} · {isActiveLocked ? "locked" : "available"}</p></div>
+                <div className="flex flex-wrap gap-2"><button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setCode(activeChallenge.solution.code)}>Load passing</button><button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setCode(activeChallenge.starterCode)}>Reset</button><button className="rounded-xl border border-amber-300/40 px-3 py-2 text-sm text-amber-100 hover:bg-amber-300/10" onClick={openHint}>Hint ({progress.hintsOpened[activeChallenge.id] ?? 0})</button><button className="rounded-xl border border-amber-300/40 px-3 py-2 text-sm text-amber-100 hover:bg-amber-300/10" onClick={openSolution}>Open solution scroll</button><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-cyan-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit()}>{isRunning ? "Running…" : "Run ▶"}</button></div>
+              </div>
+              <p className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">{activeChallenge.brief}</p>
+              {activeChallenge.hints?.length ? <div className="mb-3 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-3 text-sm text-amber-50"><b>Hint preview:</b> {activeChallenge.hints[Math.min((progress.hintsOpened[activeChallenge.id] ?? 1) - 1, activeChallenge.hints.length - 1)]?.text ?? "Click Hint to reveal one."}</div> : null}
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-3"><div className="grid grid-cols-[3rem_1fr] gap-3"><pre aria-hidden="true" className="select-none text-right font-mono text-sm leading-6 text-slate-500">{lineNumbers(code)}</pre><textarea ref={textareaRef} aria-label="Python solution editor" className="min-h-[30rem] resize-y bg-transparent font-mono text-sm leading-6 text-slate-100 outline-none [font-feature-settings:'liga'_0,'calt'_0]" spellCheck={false} value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={handleEditorKeyDown} /></div></div>
+              <details className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-3" open={Boolean(progress.solutionOpened[activeChallenge.id])}><summary className="cursor-pointer text-sm font-bold text-amber-100">Solution scroll {progress.solutionOpened[activeChallenge.id] ? "opened — solution-assisted" : "hidden"}</summary>{progress.solutionOpened[activeChallenge.id] ? <pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs text-amber-50">{activeChallenge.solution.code}</pre> : <p className="mt-2 text-sm text-slate-400">Click “Open solution scroll” to reveal and record solution use.</p>}</details>
+              {runError ? <p className="mt-3 rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}
+            </section>
+
+            <section className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-slate-950/80 p-4 shadow-xl">
+              <div className="flex flex-wrap items-center justify-between gap-3"><OutcomeBadge status={result?.status ?? "internal_error"} passed={result?.passed ?? false} /><PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} /></div>
+              <SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} />
+              <div className="grid gap-4 lg:grid-cols-2"><CodeTrace code={code} activeLine={activeLine} /><div className="space-y-4"><VarsPanel vars={latestVars} event={activeEvent} /><CasesPanel result={result} /><AttemptHistory attempts={activeAttempts} /></div></div>
+            </section>
           </div>
-
-          <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-4 shadow-xl">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-bold">Question + code editor</h2>
-                <p className="text-sm text-slate-400">Line numbers, Tab/Shift+Tab, auto-indent, and Ctrl/Cmd+Enter are wired. Ligatures are disabled.</p>
-                <p className="mt-1 text-xs text-slate-500">{activeChallenge.title} · {isActiveLocked ? "locked" : "available"}</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setCode(activeChallenge.solution.code)}>Load passing</button>
-                <button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setCode(activeChallenge.starterCode)}>Reset</button>
-                <button className="rounded-xl border border-amber-300/40 px-3 py-2 text-sm text-amber-100 hover:bg-amber-300/10" onClick={openHint}>Hint ({progress.hintsOpened[activeChallenge.id] ?? 0})</button>
-                <button className="rounded-xl border border-amber-300/40 px-3 py-2 text-sm text-amber-100 hover:bg-amber-300/10" onClick={openSolution}>Open solution scroll</button>
-                <button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-cyan-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit()}>{isRunning ? "Running…" : "Run ▶"}</button>
-              </div>
-            </div>
-            <p className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">{activeChallenge.brief}</p>
-            {activeChallenge.hints?.length ? <div className="mb-3 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-3 text-sm text-amber-50"><b>Hint preview:</b> {activeChallenge.hints[Math.min((progress.hintsOpened[activeChallenge.id] ?? 1) - 1, activeChallenge.hints.length - 1)]?.text ?? "Click Hint to reveal one."}</div> : null}
-            <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-3">
-              <div className="grid grid-cols-[3rem_1fr] gap-3">
-                <pre aria-hidden="true" className="select-none text-right font-mono text-sm leading-6 text-slate-500">{lineNumbers(code)}</pre>
-                <textarea ref={textareaRef} aria-label="Python solution editor" className="min-h-[30rem] resize-y bg-transparent font-mono text-sm leading-6 text-slate-100 outline-none [font-feature-settings:'liga'_0,'calt'_0]" spellCheck={false} value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={handleEditorKeyDown} />
-              </div>
-            </div>
-            <details className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-3" open={Boolean(progress.solutionOpened[activeChallenge.id])}>
-              <summary className="cursor-pointer text-sm font-bold text-amber-100">Solution scroll {progress.solutionOpened[activeChallenge.id] ? "opened — solution-assisted" : "hidden"}</summary>
-              {progress.solutionOpened[activeChallenge.id] ? <pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs text-amber-50">{activeChallenge.solution.code}</pre> : <p className="mt-2 text-sm text-slate-400">Click “Open solution scroll” to reveal and record solution use.</p>}
-            </details>
-            {runError ? <p className="mt-3 rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}
-          </section>
-
-          <section className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-slate-950/80 p-4 shadow-xl">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <OutcomeBadge status={result?.status ?? "internal_error"} passed={result?.passed ?? false} />
-              <PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} />
-            </div>
-            <SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} />
-            <div className="grid gap-4 lg:grid-cols-2">
-              <CodeTrace code={code} activeLine={activeLine} />
-              <div className="space-y-4"><VarsPanel vars={latestVars} event={activeEvent} /><CasesPanel result={result} /><AttemptHistory attempts={activeAttempts} /></div>
-            </div>
-          </section>
-        </div>
+        )}
       </section>
     </main>
   );
