@@ -23,7 +23,7 @@ type TimelineEvent = {
   kind: "line" | "read" | "write" | "compare" | "call" | "return" | "outcome" | "note";
   line?: number;
   vars?: Record<string, unknown>;
-  ref?: { structure: "array"; name: string; index: number };
+  ref?: { structure: "array"; name: string; index?: number; nodeId?: string; field?: string };
   value?: unknown;
   readCount?: number;
   status?: Status;
@@ -59,34 +59,84 @@ type RunResult = {
   limits: { maxEvents: number; maxDurationMs: number; maxReads?: number };
 };
 
-type PackChallenge = {
+type Hint = { id: string; text: string; cost: string };
+type ReviewVariant = { id: string; title: string; mutation: string };
+type PackReview = { enabled: boolean; defaultSchedule: number[]; variants: ReviewVariant[]; rules?: Record<string, unknown> };
+type Pack = {
+  slug: string;
+  title: string;
+  metadata: { shortDescription: string; displayName?: string };
+  concepts: string[];
+  scene: { type: "array" | "linked_list" };
+  quests: BaseChallenge[];
+  boss: BaseChallenge;
+  review?: PackReview;
+};
+type BaseChallenge = {
   id: string;
   order?: number;
   title: string;
   brief: string;
   starterCode: string;
   solution: { code: string };
+  hints?: Hint[];
   unlock: { requiresQuestIds: string[]; requiresPassed: boolean };
+};
+type PackChallenge = BaseChallenge & {
   packSlug: string;
   packTitle: string;
   packSceneType: "array" | "linked_list";
+  packConcepts: string[];
+  isBoss: boolean;
 };
 type Challenge = PackChallenge;
-type Attempt = { id: string; at: string; challengeId: string; status: Status; passed: boolean; replayCaseId?: string; eventCount: number; timelinePointer: string; solutionAssisted: boolean };
-type ProgressState = { cleared: Record<string, boolean>; solutionOpened: Record<string, boolean>; attempts: Record<string, Attempt[]>; savedCode: Record<string, string> };
+type Attempt = {
+  id: string;
+  at: string;
+  challengeId: string;
+  packSlug: string;
+  status: Status;
+  passed: boolean;
+  replayCaseId?: string;
+  eventCount: number;
+  timelinePointer: string;
+  solutionAssisted: boolean;
+  hintCount: number;
+};
+type ReviewRecord = {
+  packSlug: string;
+  bossId: string;
+  topic: string;
+  intervalDays: number;
+  nextDueAt: string;
+  lastOutcome: Status;
+  streak: number;
+  rating: number;
+  snoozedUntil?: string;
+};
+type ProgressState = {
+  cleared: Record<string, boolean>;
+  solutionOpened: Record<string, boolean>;
+  hintsOpened: Record<string, number>;
+  attempts: Record<string, Attempt[]>;
+  savedCode: Record<string, string>;
+  reviews: Record<string, ReviewRecord>;
+};
 
-const PACKS = [samplePack, reversePack, mergePack, cyclePack, plainBinaryPack] as const;
+const PACKS = [samplePack, reversePack, mergePack, cyclePack, plainBinaryPack] as Pack[];
+const PACK_BY_SLUG = Object.fromEntries(PACKS.map((pack) => [pack.slug, pack]));
 const CHALLENGES: Challenge[] = PACKS.flatMap((pack) => [...pack.quests, pack.boss].map((challenge) => ({
   ...challenge,
   packSlug: pack.slug,
   packTitle: pack.title,
-  packSceneType: pack.scene.type as "array" | "linked_list"
+  packSceneType: pack.scene.type,
+  packConcepts: pack.concepts,
+  isBoss: challenge.id === pack.boss.id
 })));
-const STARTER_CODE = samplePack.boss.starterCode;
-const PASSING_CODE = samplePack.boss.solution.code;
+const CHALLENGE_BY_ID = Object.fromEntries(CHALLENGES.map((challenge) => [challenge.id, challenge]));
 const TABS = "    ";
 const PLAY_SPEEDS = [0.5, 1, 2, 4];
-const EMPTY_PROGRESS: ProgressState = { cleared: {}, solutionOpened: {}, attempts: {}, savedCode: {} };
+const EMPTY_PROGRESS: ProgressState = { cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, reviews: {} };
 
 const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string }> = {
   passed: { title: "passed:", visual: "gold relic glow", tone: "text-emerald-200 bg-emerald-500/15 border-emerald-300/40" },
@@ -100,7 +150,6 @@ const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string
 };
 
 export default function Home() {
-  const pack = samplePack;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [userNameDraft, setUserNameDraft] = useState("Eric");
   const [userName, setUserName] = useState<string | null>(null);
@@ -124,7 +173,12 @@ export default function Home() {
   const latestVars = useMemo(() => collectVars(events, cursor), [events, cursor]);
   const sceneMode = replay?.input.structure === "linked_list" ? "portals" : (replay?.input.values.length ?? 0) > 24 ? "skyline" : "doors";
   const activeAttempts = progress.attempts[activeChallenge.id] ?? [];
-  const bossUnlocked = samplePack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]);
+  const reviewItems = useMemo(() => buildReviewItems(progress), [progress]);
+  const dueReviews = reviewItems.filter((item) => item.isDue && !item.isSnoozed);
+  const eligibleSurprises = reviewItems.filter((item) => item.studied);
+  const topicStats = useMemo(() => buildTopicStats(progress), [progress]);
+  const activePack = PACK_BY_SLUG[activeChallenge.packSlug];
+  const bossUnlocked = activePack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]);
   const isActiveLocked = !isUnlocked(activeChallenge, progress);
 
   useEffect(() => {
@@ -183,7 +237,7 @@ export default function Home() {
     } finally {
       setIsRunning(false);
     }
-  }, [activeChallenge.id, code, isActiveLocked]);
+  }, [activeChallenge, code, isActiveLocked, progress.hintsOpened, progress.solutionOpened]);
 
   useEffect(() => {
     if (!playing || events.length === 0) return;
@@ -213,26 +267,60 @@ export default function Home() {
   }
 
   function recordAttempt(runResult: RunResult) {
+    const solutionAssisted = Boolean(progress.solutionOpened[activeChallenge.id]);
+    const hintCount = progress.hintsOpened[activeChallenge.id] ?? 0;
     const attempt: Attempt = {
       id: `${activeChallenge.id}-${Date.now()}`,
       at: new Date().toISOString(),
       challengeId: activeChallenge.id,
+      packSlug: activeChallenge.packSlug,
       status: runResult.status,
       passed: runResult.passed,
       replayCaseId: runResult.replay?.caseId,
       eventCount: runResult.replay?.summary.eventCount ?? 0,
       timelinePointer: `${activeChallenge.id}:${runResult.replay?.caseId ?? "none"}:${runResult.startedAt}`,
-      solutionAssisted: Boolean(progress.solutionOpened[activeChallenge.id])
+      solutionAssisted,
+      hintCount
     };
-    setProgress((current) => ({
-      ...current,
-      cleared: { ...current.cleared, [activeChallenge.id]: current.cleared[activeChallenge.id] || runResult.passed },
-      attempts: { ...current.attempts, [activeChallenge.id]: [attempt, ...(current.attempts[activeChallenge.id] ?? [])].slice(0, 15) }
-    }));
+    setProgress((current) => {
+      const next: ProgressState = {
+        ...current,
+        cleared: { ...current.cleared, [activeChallenge.id]: current.cleared[activeChallenge.id] || runResult.passed },
+        attempts: { ...current.attempts, [activeChallenge.id]: [attempt, ...(current.attempts[activeChallenge.id] ?? [])].slice(0, 15) }
+      };
+      if (activeChallenge.isBoss) next.reviews = scheduleReview(current, activeChallenge, runResult, solutionAssisted, hintCount);
+      return next;
+    });
   }
 
   function openSolution() {
     setProgress((current) => ({ ...current, solutionOpened: { ...current.solutionOpened, [activeChallenge.id]: true } }));
+  }
+
+  function openHint() {
+    setProgress((current) => ({ ...current, hintsOpened: { ...current.hintsOpened, [activeChallenge.id]: (current.hintsOpened[activeChallenge.id] ?? 0) + 1 } }));
+  }
+
+  function snoozeReview(packSlug: string) {
+    setProgress((current) => {
+      const existing = current.reviews[packSlug];
+      if (!existing) return current;
+      return { ...current, reviews: { ...current.reviews, [packSlug]: { ...existing, snoozedUntil: addDays(new Date(), 1).toISOString() } } };
+    });
+  }
+
+  function startReview(item: ReviewItem) {
+    setActiveId(item.record.bossId);
+    setRunError(`Review preview: ${item.variant?.title ?? "boss replay"}. ${item.variant?.mutation ?? "Run the boss again to reinforce it."}`);
+  }
+
+  function startSurprise() {
+    const choice = dueReviews[0] ?? eligibleSurprises[0];
+    if (!choice) {
+      setRunError("No studied topics are eligible yet. Beat a boss first.");
+      return;
+    }
+    startReview(choice);
   }
 
   function handleEditorKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -266,9 +354,9 @@ export default function Home() {
         <header className="rounded-3xl border border-cyan-300/25 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-950/30">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 4 Personal MVP App Loop</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
-              <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{pack.title}</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">{pack.metadata.shortDescription} Sign in, clear quests, unlock the boss, save attempts, and keep progress across logout/login.</p>
+              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 6 Review + Reinforcement</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
+              <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{activeChallenge.packTitle}</h1>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Spaced boss reviews, surprise battles from studied topics, per-topic stats, and snooze/preview controls now sit on top of the coding dojo loop.</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
               {userName ? (
@@ -278,17 +366,22 @@ export default function Home() {
               )}
             </div>
           </div>
-          <div className="mt-4 grid gap-2 text-sm sm:grid-cols-4">
+          <div className="mt-4 grid gap-2 text-sm sm:grid-cols-5">
             <Metric label="Replay case" value={replay?.caseId ?? "none"} />
             <Metric label="Events" value={`${events.length}/${result?.limits.maxEvents ?? 3000}`} />
             <Metric label="Mode" value={sceneMode} />
             <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
+            <Metric label="Reviews due" value={`${dueReviews.length}`} />
             <Metric label="Library" value={`${PACKS.length} packs / ${CHALLENGES.length} challenges`} />
           </div>
         </header>
 
-        <div className="grid gap-6 xl:grid-cols-[18rem_minmax(420px,0.85fr)_minmax(520px,1.15fr)]">
-          <LibraryPanel progress={progress} activeId={activeChallenge.id} onSelect={setActiveId} />
+        <div className="grid gap-6 xl:grid-cols-[19rem_minmax(420px,0.9fr)_minmax(520px,1.1fr)]">
+          <div className="space-y-4">
+            <LibraryPanel progress={progress} activeId={activeChallenge.id} onSelect={setActiveId} />
+            <ReviewPanel items={reviewItems} dueCount={dueReviews.length} onPreview={startReview} onSnooze={snoozeReview} onSurprise={startSurprise} />
+            <StatsPanel stats={topicStats} />
+          </div>
 
           <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-4 shadow-xl">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -300,11 +393,13 @@ export default function Home() {
               <div className="flex flex-wrap gap-2">
                 <button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setCode(activeChallenge.solution.code)}>Load passing</button>
                 <button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setCode(activeChallenge.starterCode)}>Reset</button>
+                <button className="rounded-xl border border-amber-300/40 px-3 py-2 text-sm text-amber-100 hover:bg-amber-300/10" onClick={openHint}>Hint ({progress.hintsOpened[activeChallenge.id] ?? 0})</button>
                 <button className="rounded-xl border border-amber-300/40 px-3 py-2 text-sm text-amber-100 hover:bg-amber-300/10" onClick={openSolution}>Open solution scroll</button>
                 <button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-cyan-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit()}>{isRunning ? "Running…" : "Run ▶"}</button>
               </div>
             </div>
             <p className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">{activeChallenge.brief}</p>
+            {activeChallenge.hints?.length ? <div className="mb-3 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-3 text-sm text-amber-50"><b>Hint preview:</b> {activeChallenge.hints[Math.min((progress.hintsOpened[activeChallenge.id] ?? 1) - 1, activeChallenge.hints.length - 1)]?.text ?? "Click Hint to reveal one."}</div> : null}
             <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-3">
               <div className="grid grid-cols-[3rem_1fr] gap-3">
                 <pre aria-hidden="true" className="select-none text-right font-mono text-sm leading-6 text-slate-500">{lineNumbers(code)}</pre>
@@ -315,7 +410,7 @@ export default function Home() {
               <summary className="cursor-pointer text-sm font-bold text-amber-100">Solution scroll {progress.solutionOpened[activeChallenge.id] ? "opened — solution-assisted" : "hidden"}</summary>
               {progress.solutionOpened[activeChallenge.id] ? <pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs text-amber-50">{activeChallenge.solution.code}</pre> : <p className="mt-2 text-sm text-slate-400">Click “Open solution scroll” to reveal and record solution use.</p>}
             </details>
-            {runError ? <p className="mt-3 rounded-xl border border-red-300/40 bg-red-500/10 p-3 text-sm text-red-200">{runError}</p> : null}
+            {runError ? <p className="mt-3 rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}
           </section>
 
           <section className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-slate-950/80 p-4 shadow-xl">
@@ -323,9 +418,7 @@ export default function Home() {
               <OutcomeBadge status={result?.status ?? "internal_error"} passed={result?.passed ?? false} />
               <PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} />
             </div>
-
             <SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} />
-
             <div className="grid gap-4 lg:grid-cols-2">
               <CodeTrace code={code} activeLine={activeLine} />
               <div className="space-y-4"><VarsPanel vars={latestVars} event={activeEvent} /><CasesPanel result={result} /><AttemptHistory attempts={activeAttempts} /></div>
@@ -338,7 +431,16 @@ export default function Home() {
 }
 
 function LibraryPanel({ progress, activeId, onSelect }: { progress: ProgressState; activeId: string; onSelect: (id: string) => void }) {
-  return <aside className="rounded-3xl border border-white/10 bg-slate-950/80 p-4"><h2 className="text-xl font-bold">Library by category</h2><p className="mt-1 text-sm text-slate-400">Binary search · Timequake pack</p><div className="mt-4 space-y-2">{CHALLENGES.map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); return <button key={challenge.id} className={`w-full rounded-2xl border p-3 text-left text-sm ${activeId === challenge.id ? "border-cyan-300 bg-cyan-300/10" : "border-white/10 bg-white/5"}`} onClick={() => onSelect(challenge.id)}><span className="font-bold">{challenge.id === samplePack.boss.id ? "Boss" : `Quest ${"order" in challenge ? challenge.order : ""}`}: {challenge.title}</span><span className="mt-1 block text-xs text-slate-400">{cleared ? "cleared" : locked ? "locked" : "unlocked"} · {(progress.attempts[challenge.id] ?? []).length} attempts</span></button>; })}</div></aside>;
+  return <aside className="rounded-3xl border border-white/10 bg-slate-950/80 p-4"><h2 className="text-xl font-bold">Library by category</h2><p className="mt-1 text-sm text-slate-400">Binary search · Linked list · review-enabled</p><div className="mt-4 space-y-2">{CHALLENGES.map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); return <button key={challenge.id} className={`w-full rounded-2xl border p-3 text-left text-sm ${activeId === challenge.id ? "border-cyan-300 bg-cyan-300/10" : "border-white/10 bg-white/5"}`} onClick={() => onSelect(challenge.id)}><span className="font-bold">{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</span><span className="mt-1 block text-xs text-slate-400">{challenge.packTitle} · {cleared ? "cleared" : locked ? "locked" : "unlocked"} · {(progress.attempts[challenge.id] ?? []).length} attempts</span></button>; })}</div></aside>;
+}
+
+type ReviewItem = { pack: Pack; record: ReviewRecord; variant?: ReviewVariant; isDue: boolean; isSnoozed: boolean; studied: boolean };
+function ReviewPanel({ items, dueCount, onPreview, onSnooze, onSurprise }: { items: ReviewItem[]; dueCount: number; onPreview: (item: ReviewItem) => void; onSnooze: (packSlug: string) => void; onSurprise: () => void }) {
+  return <aside className="rounded-3xl border border-emerald-300/20 bg-emerald-950/20 p-4"><div className="flex items-center justify-between gap-2"><div><h2 className="text-xl font-bold">Review scheduler</h2><p className="text-sm text-slate-400">stale-review scheduler · review variants · snooze/preview</p></div><button className="rounded-xl bg-emerald-300 px-3 py-2 text-xs font-bold text-slate-950" onClick={onSurprise}>Surprise battle</button></div><p className="mt-3 rounded-xl border border-white/10 bg-white/5 p-2 text-sm">{dueCount} due now. Surprise battles only draw from studied boss topics.</p><div className="mt-3 space-y-2">{items.length ? items.map((item) => <div key={item.pack.slug} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm"><b>{item.pack.metadata.displayName ?? item.pack.title}</b><p className="text-xs text-slate-400">next due {formatDate(item.record.nextDueAt)} · interval {item.record.intervalDays}d · streak {item.record.streak} · rating {item.record.rating}</p><p className="mt-1 text-xs text-emerald-100">Variant: {item.variant?.title ?? "boss replay"}</p><div className="mt-2 flex gap-2"><button className="control" onClick={() => onPreview(item)}>Preview</button><button className="control" onClick={() => onSnooze(item.pack.slug)}>Snooze 1d</button></div>{item.isSnoozed ? <p className="mt-1 text-xs text-amber-200">snoozed until {formatDate(item.record.snoozedUntil)}</p> : null}</div>) : <p className="mt-3 text-sm text-slate-400">Beat a boss to put it on spaced review.</p>}</div></aside>;
+}
+
+function StatsPanel({ stats }: { stats: TopicStat[] }) {
+  return <aside className="rounded-3xl border border-purple-300/20 bg-purple-950/20 p-4"><h2 className="text-xl font-bold">Per-topic stats</h2><p className="text-sm text-slate-400">defeated · attempts · hint/solution use · streak/rating</p><div className="mt-3 space-y-2">{stats.map((stat) => <div key={stat.topic} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm"><b>{stat.topic}</b><p className="text-xs text-slate-400">defeated {stat.defeated} · attempts {stat.attempts} · hints {stat.hints} · solutions {stat.solutions} · streak {stat.streak} · rating {stat.rating}</p></div>)}</div></aside>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><p className="text-[0.65rem] uppercase tracking-[0.2em] text-slate-500">{label}</p><p className="mt-1 truncate font-bold text-cyan-100">{value}</p></div>; }
@@ -349,20 +451,12 @@ function SceneRenderer(props: { replay: ReplayCase | null; activeReadIndex?: num
   if (props.replay?.input.structure === "linked_list") return <LinkedListScene replay={props.replay} vars={props.vars} />;
   return <ArrayScene {...props} />;
 }
-
-function LinkedListScene({ replay, vars }: { replay: ReplayCase | null; vars: Record<string, unknown> }) {
-  const values = replay?.input.values ?? [];
-  return <div className="rounded-3xl border border-purple-300/20 bg-gradient-to-b from-slate-900 to-slate-950 p-4"><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Linked-list portal/island scene</h2><p className="text-sm text-slate-400">pointer movement / relinking visible</p></div><div className="flex flex-wrap items-center gap-3">{values.map((value, index) => <div key={`${index}-${value}`} className="flex items-center gap-3"><div className="relative rounded-full border border-purple-200/50 bg-purple-300/15 px-4 py-3 text-center shadow-lg shadow-purple-950/40"><span className="block text-[0.65rem] text-purple-200">island {index}</span><b>{value}</b>{Object.values(vars).includes(index) ? <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded bg-yellow-300 px-1 text-[0.6rem] font-bold text-slate-950">ptr</span> : null}</div>{index < values.length - 1 ? <span className="text-purple-200">⟶ portal</span> : null}</div>)}</div><p className="mt-3 text-xs text-slate-400">Replay reads `.val` and `.next` through ListNode proxies so portal checks are counted and shown in the event stream.</p></div>;
-}
-
-function ArrayScene({ replay, activeReadIndex, vars, mode }: { replay: ReplayCase | null; activeReadIndex?: number; vars: Record<string, unknown>; mode: string }) {
-  const values = replay?.input.values ?? []; const target = replay?.input.target; const expected = replay?.input.expectedIndex; const large = mode === "skyline"; const shown = large ? values.slice(0, 80) : values;
-  return <div className="rounded-3xl border border-cyan-300/20 bg-gradient-to-b from-slate-900 to-slate-950 p-4"><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Array scene: {large ? "skyline" : "doors"}</h2><p className="text-sm text-slate-400">target relic: <span className="text-cyan-200">{String(target ?? "?")}</span></p></div><div className={`grid gap-2 ${large ? "grid-cols-[repeat(40,minmax(0,1fr))]" : "grid-cols-7"}`}>{shown.map((value, index) => { const isRead = index === activeReadIndex; const isExpected = index === expected; const hasPointer = Object.values(vars).includes(index); return <div key={`${index}-${value}`} className={`relative flex items-end justify-center rounded-xl border text-xs transition-all ${large ? "h-28" : "h-20"} ${isRead ? "border-cyan-200 bg-cyan-300/30 shadow-lg shadow-cyan-300/30" : "border-white/10 bg-white/5"} ${isExpected ? "ring-2 ring-emerald-300" : ""}`}>{large ? <div className="w-full rounded-t-lg bg-cyan-400/50" style={{ height: `${Math.max(8, (Number(value) / Math.max(1, values.length)) * 100)}%` }} /> : <><span className="absolute top-2 text-[0.65rem] text-slate-500">#{index}</span><span className="pb-4 font-bold">{value}</span></>}{hasPointer ? <span className="absolute -top-3 rounded bg-yellow-300 px-1 text-[0.6rem] font-bold text-slate-950">var</span> : null}</div>; })}</div>{large && values.length > shown.length ? <p className="mt-2 text-xs text-slate-500">Showing first {shown.length} of {values.length} skyline bars to keep 3,000-step replays responsive.</p> : null}</div>;
-}
+function LinkedListScene({ replay, vars }: { replay: ReplayCase | null; vars: Record<string, unknown> }) { const values = replay?.input.values ?? []; return <div className="rounded-3xl border border-purple-300/20 bg-gradient-to-b from-slate-900 to-slate-950 p-4"><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Linked-list portal/island scene</h2><p className="text-sm text-slate-400">pointer movement / relinking visible</p></div><div className="flex flex-wrap items-center gap-3">{values.map((value, index) => <div key={`${index}-${value}`} className="flex items-center gap-3"><div className="relative rounded-full border border-purple-200/50 bg-purple-300/15 px-4 py-3 text-center shadow-lg shadow-purple-950/40"><span className="block text-[0.65rem] text-purple-200">island {index}</span><b>{value}</b>{Object.values(vars).includes(index) ? <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded bg-yellow-300 px-1 text-[0.6rem] font-bold text-slate-950">ptr</span> : null}</div>{index < values.length - 1 ? <span className="text-purple-200">⟶ portal</span> : null}</div>)}</div><p className="mt-3 text-xs text-slate-400">Replay reads `.val` and `.next` through ListNode proxies so portal checks are counted and shown in the event stream.</p></div>; }
+function ArrayScene({ replay, activeReadIndex, vars, mode }: { replay: ReplayCase | null; activeReadIndex?: number; vars: Record<string, unknown>; mode: string }) { const values = replay?.input.values ?? []; const target = replay?.input.target; const expected = replay?.input.expectedIndex; const large = mode === "skyline"; const shown = large ? values.slice(0, 80) : values; return <div className="rounded-3xl border border-cyan-300/20 bg-gradient-to-b from-slate-900 to-slate-950 p-4"><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Array scene: {large ? "skyline" : "doors"}</h2><p className="text-sm text-slate-400">target relic: <span className="text-cyan-200">{String(target ?? "?")}</span></p></div><div className={`grid gap-2 ${large ? "grid-cols-[repeat(40,minmax(0,1fr))]" : "grid-cols-7"}`}>{shown.map((value, index) => { const isRead = index === activeReadIndex; const isExpected = index === expected; const hasPointer = Object.values(vars).includes(index); return <div key={`${index}-${value}`} className={`relative flex items-end justify-center rounded-xl border text-xs transition-all ${large ? "h-28" : "h-20"} ${isRead ? "border-cyan-200 bg-cyan-300/30 shadow-lg shadow-cyan-300/30" : "border-white/10 bg-white/5"} ${isExpected ? "ring-2 ring-emerald-300" : ""}`}>{large ? <div className="w-full rounded-t-lg bg-cyan-400/50" style={{ height: `${Math.max(8, (Number(value) / Math.max(1, values.length)) * 100)}%` }} /> : <><span className="absolute top-2 text-[0.65rem] text-slate-500">#{index}</span><span className="pb-4 font-bold">{value}</span></>}{hasPointer ? <span className="absolute -top-3 rounded bg-yellow-300 px-1 text-[0.6rem] font-bold text-slate-950">var</span> : null}</div>; })}</div>{large && values.length > shown.length ? <p className="mt-2 text-xs text-slate-500">Showing first {shown.length} of {values.length} skyline bars to keep 3,000-step replays responsive.</p> : null}</div>; }
 function CodeTrace({ code, activeLine }: { code: string; activeLine?: number }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3"><h3 className="mb-2 font-bold">Line movement</h3><pre className="max-h-80 overflow-auto font-mono text-xs leading-6">{code.split("\n").map((line, index) => <div key={index} className={activeLine === index + 1 ? "rounded bg-cyan-300/20 text-cyan-100" : "text-slate-400"}><span className="mr-3 inline-block w-6 text-right text-slate-600">{index + 1}</span>{line || " "}</div>)}</pre></div>; }
 function VarsPanel({ vars, event }: { vars: Record<string, unknown>; event?: TimelineEvent }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3"><h3 className="font-bold">Variables + event</h3><pre className="mt-2 overflow-auto text-xs text-slate-300">{JSON.stringify({ vars, event }, null, 2)}</pre></div>; }
 function CasesPanel({ result }: { result: RunResult | null }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3"><h3 className="font-bold">Cases</h3><div className="mt-2 space-y-2 text-sm">{result?.cases.map((testCase, index) => <div key={testCase.caseId} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2"><span>{index === result.execution.replayCaseIndex ? "▶ " : ""}{testCase.caseId}</span><span className={testCase.passed ? "text-emerald-300" : "text-rose-300"}>{testCase.status}</span></div>) ?? <p className="text-slate-500">Waiting for runner…</p>}</div></div>; }
-function AttemptHistory({ attempts }: { attempts: Attempt[] }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3"><h3 className="font-bold">Attempt history</h3><div className="mt-2 max-h-52 space-y-2 overflow-auto text-xs">{attempts.length ? attempts.map((attempt) => <div key={attempt.id} className="rounded-xl bg-white/5 p-2"><b>{attempt.status}</b> · {attempt.replayCaseId ?? "no replay"}<br />timeline: {attempt.timelinePointer}<br />{attempt.solutionAssisted ? "solution-assisted" : "unassisted"}</div>) : <p className="text-slate-500">No attempts yet.</p>}</div></div>; }
+function AttemptHistory({ attempts }: { attempts: Attempt[] }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3"><h3 className="font-bold">Attempt history</h3><div className="mt-2 max-h-52 space-y-2 overflow-auto text-xs">{attempts.length ? attempts.map((attempt) => <div key={attempt.id} className="rounded-xl bg-white/5 p-2"><b>{attempt.status}</b> · {attempt.replayCaseId ?? "no replay"}<br />timeline: {attempt.timelinePointer}<br />{attempt.solutionAssisted ? "solution-assisted" : "unassisted"} · hints {attempt.hintCount}</div>) : <p className="text-slate-500">No attempts yet.</p>}</div></div>; }
 
 function isUnlocked(challenge: Challenge, progress: ProgressState) { return challenge.unlock.requiresQuestIds.every((id) => progress.cleared[id]); }
 function collectVars(events: TimelineEvent[], cursor: number) { const vars: Record<string, unknown> = {}; for (let i = 0; i <= cursor && i < events.length; i += 1) Object.assign(vars, events[i].vars ?? {}); return vars; }
@@ -374,3 +468,58 @@ function writeProgress(key: string, value: ProgressState) { try { window.localSt
 function safeLocalStorageGet(key: string) { try { return window.localStorage.getItem(key); } catch { return null; } }
 function safeLocalStorageSet(key: string, value: string) { try { window.localStorage.setItem(key, value); } catch {} }
 function safeLocalStorageRemove(key: string) { try { window.localStorage.removeItem(key); } catch {} }
+function addDays(date: Date, days: number) { const next = new Date(date); next.setDate(next.getDate() + days); return next; }
+function formatDate(value?: string) { if (!value) return "none"; return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
+function nextInterval(schedule: number[], previous: number) { return schedule.find((days) => days > previous) ?? Math.min(previous * 2, schedule.at(-1) ?? 30); }
+function scheduleReview(current: ProgressState, challenge: Challenge, runResult: RunResult, solutionAssisted: boolean, hintCount: number) {
+  const pack = PACK_BY_SLUG[challenge.packSlug];
+  const existing = current.reviews[challenge.packSlug];
+  const schedule = pack.review?.defaultSchedule ?? [1, 3, 7, 14, 30];
+  const prior = existing?.intervalDays ?? 0;
+  const easyWin = runResult.passed && !solutionAssisted && hintCount === 0;
+  const assistedWin = runResult.passed && (solutionAssisted || hintCount > 0);
+  const intervalDays = easyWin ? nextInterval(schedule, prior) : assistedWin ? Math.max(1, Math.min(prior || schedule[0], hintCount >= 2 ? 3 : 7)) : 1;
+  const streak = runResult.passed ? (existing?.streak ?? 0) + 1 : 0;
+  const rating = Math.max(0, Math.min(2400, (existing?.rating ?? 1000) + (easyWin ? 80 : assistedWin ? 20 : -60)));
+  return {
+    ...current.reviews,
+    [challenge.packSlug]: {
+      packSlug: challenge.packSlug,
+      bossId: challenge.id,
+      topic: challenge.packConcepts[0] ?? challenge.packTitle,
+      intervalDays,
+      nextDueAt: addDays(new Date(), intervalDays).toISOString(),
+      lastOutcome: runResult.status,
+      streak,
+      rating
+    }
+  };
+}
+function buildReviewItems(progress: ProgressState): ReviewItem[] {
+  const now = Date.now();
+  return Object.values(progress.reviews).map((record) => {
+    const pack = PACK_BY_SLUG[record.packSlug];
+    const snoozedUntil = record.snoozedUntil ? new Date(record.snoozedUntil).getTime() : 0;
+    return { pack, record, variant: pack.review?.variants?.[0], isDue: new Date(record.nextDueAt).getTime() <= now, isSnoozed: snoozedUntil > now, studied: Boolean(progress.cleared[record.bossId]) };
+  }).filter((item) => item.pack);
+}
+type TopicStat = { topic: string; defeated: number; attempts: number; hints: number; solutions: number; streak: number; rating: number };
+function buildTopicStats(progress: ProgressState): TopicStat[] {
+  const byTopic: Record<string, TopicStat> = {};
+  for (const pack of PACKS) {
+    const topic = pack.concepts[0] ?? pack.title;
+    byTopic[topic] ??= { topic, defeated: 0, attempts: 0, hints: 0, solutions: 0, streak: 0, rating: 1000 };
+    if (progress.cleared[pack.boss.id]) byTopic[topic].defeated += 1;
+    const review = progress.reviews[pack.slug];
+    if (review) { byTopic[topic].streak += review.streak; byTopic[topic].rating = Math.max(byTopic[topic].rating, review.rating); }
+  }
+  for (const attempts of Object.values(progress.attempts)) for (const attempt of attempts) {
+    const challenge = CHALLENGE_BY_ID[attempt.challengeId];
+    const topic = challenge?.packConcepts[0] ?? "mixed";
+    byTopic[topic] ??= { topic, defeated: 0, attempts: 0, hints: 0, solutions: 0, streak: 0, rating: 1000 };
+    byTopic[topic].attempts += 1;
+    byTopic[topic].hints += attempt.hintCount;
+    if (attempt.solutionAssisted) byTopic[topic].solutions += 1;
+  }
+  return Object.values(byTopic);
+}

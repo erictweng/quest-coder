@@ -282,7 +282,33 @@
       14,
       30
     ],
-    "variants": [],
+    "variants": [
+      {
+        "id": "review-linked-list-cycle-core",
+        "title": "Review: Boss: Detect the Endless Portal",
+        "mutation": "Repeat the boss pattern with a saved review case to reinforce recall.",
+        "tests": {
+          "fixed": [
+            {
+              "id": "cycle-yes",
+              "input": {
+                "head": [
+                  3,
+                  2,
+                  0,
+                  -4
+                ],
+                "pos": 1
+              },
+              "expected": true
+            }
+          ],
+          "replayCaseIds": [
+            "cycle-yes"
+          ]
+        }
+      }
+    ],
     "rules": {
       "failedReviewIntervalDays": 1,
       "solutionAssistedIntervalDays": 1,

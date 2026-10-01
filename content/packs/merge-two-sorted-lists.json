@@ -295,7 +295,43 @@
       14,
       30
     ],
-    "variants": [],
+    "variants": [
+      {
+        "id": "review-merge-two-sorted-lists-core",
+        "title": "Review: Boss: Merge Twin Portal Chains",
+        "mutation": "Repeat the boss pattern with a saved review case to reinforce recall.",
+        "tests": {
+          "fixed": [
+            {
+              "id": "merge-basic",
+              "input": {
+                "list1": [
+                  1,
+                  2,
+                  4
+                ],
+                "list2": [
+                  1,
+                  3,
+                  4
+                ]
+              },
+              "expected": [
+                1,
+                1,
+                2,
+                3,
+                4,
+                4
+              ]
+            }
+          ],
+          "replayCaseIds": [
+            "merge-basic"
+          ]
+        }
+      }
+    ],
     "rules": {
       "failedReviewIntervalDays": 1,
       "solutionAssistedIntervalDays": 1,
