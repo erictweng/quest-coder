@@ -118,7 +118,8 @@ type ReviewRecord = {
 };
 type RewardGrant = { id: string; at: string; challengeId: string; xp: number; shards: number; reason: string };
 type RewardWallet = { xp: number; shards: number; grants: RewardGrant[]; shopPreviewUnlocked: boolean };
-type AppSurface = "hub" | "profile" | "campaigns" | "questions" | "solve";
+type AppSurface = "hub" | "profile" | "campaigns" | "campaignDetail" | "questions" | "solve";
+type QuestionFilter = "All" | "Available" | "Cleared" | "Review" | "Boss";
 type Friend = { id: string; name: string; status: string; rating: number };
 type ProgressState = {
   cleared: Record<string, boolean>;
@@ -165,6 +166,8 @@ export default function Home() {
   const [userName, setUserName] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState>(EMPTY_PROGRESS);
   const [surface, setSurface] = useState<AppSurface>("hub");
+  const [selectedPackSlug, setSelectedPackSlug] = useState(samplePack.slug);
+  const [questionFilter, setQuestionFilter] = useState<QuestionFilter>("All");
   const [activeId, setActiveId] = useState(samplePack.quests[0]?.id ?? samplePack.boss.id);
   const activeChallenge = useMemo(() => CHALLENGES.find((challenge) => challenge.id === activeId) ?? CHALLENGES[0], [activeId]);
   const [code, setCode] = useState(activeChallenge.starterCode);
@@ -190,6 +193,7 @@ export default function Home() {
   const topicStats = useMemo(() => buildTopicStats(progress), [progress]);
   const statBar = useMemo(() => buildStatBar(progress), [progress]);
   const activePack = PACK_BY_SLUG[activeChallenge.packSlug];
+  const selectedPack = PACK_BY_SLUG[selectedPackSlug] ?? samplePack;
   const bossUnlocked = activePack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]);
   const isActiveLocked = !isUnlocked(activeChallenge, progress);
 
@@ -330,7 +334,16 @@ export default function Home() {
     });
   }
 
+  function openCampaign(packSlug: string) {
+    const pack = PACK_BY_SLUG[packSlug] ?? samplePack;
+    setSelectedPackSlug(pack.slug);
+    setActiveId(pack.quests[0]?.id ?? pack.boss.id);
+    setSurface("campaignDetail");
+  }
+
   function selectChallenge(id: string) {
+    const challenge = CHALLENGE_BY_ID[id];
+    if (challenge) setSelectedPackSlug(challenge.packSlug);
     setActiveId(id);
     setSurface("solve");
   }
@@ -395,7 +408,7 @@ export default function Home() {
           <nav className="mt-5 flex flex-wrap gap-2 text-sm" aria-label="Quest Coder primary surfaces">
             <button className={surface === "hub" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("hub")}>Hub</button>
             <button className={surface === "profile" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("profile")}>Profile</button>
-            <button className={surface === "campaigns" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("campaigns")}>Campaign</button>
+            <button className={surface === "campaigns" || surface === "campaignDetail" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("campaigns")}>Campaign</button>
             <button className={surface === "questions" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("questions")}>Questions</button>
             <button className={surface === "solve" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("solve")}>Solve</button>
           </nav>
@@ -439,10 +452,12 @@ export default function Home() {
           </section>
         ) : surface === "campaigns" ? (
           <section className="grid gap-4 lg:grid-cols-2">
-            {PACKS.map((pack) => { const cleared = [...pack.quests, pack.boss].filter((challenge) => progress.cleared[challenge.id]).length; const total = pack.quests.length + 1; return <button key={pack.slug} className="rounded-3xl border border-purple-300/20 bg-slate-950/80 p-5 text-left hover:bg-purple-300/10" onClick={() => { setActiveId(pack.quests[0]?.id ?? pack.boss.id); setSurface("questions"); }}><p className="text-xs uppercase tracking-[0.3em] text-purple-300">Campaign</p><h2 className="mt-2 text-2xl font-black">{pack.title}</h2><p className="mt-2 text-sm text-slate-300">{pack.metadata.shortDescription}</p><p className="mt-3 text-sm text-cyan-100">{cleared}/{total} cleared · Boss {pack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]) ? "open" : "locked"}</p></button>; })}
+            {PACKS.map((pack) => { const cleared = [...pack.quests, pack.boss].filter((challenge) => progress.cleared[challenge.id]).length; const total = pack.quests.length + 1; const bossOpen = pack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]); const reviewDue = dueReviews.some((item) => item.pack.slug === pack.slug); return <button key={pack.slug} className="rounded-3xl border border-purple-300/20 bg-slate-950/80 p-5 text-left hover:bg-purple-300/10" onClick={() => openCampaign(pack.slug)}><p className="text-xs uppercase tracking-[0.3em] text-purple-300">Campaign world</p><h2 className="mt-2 text-2xl font-black">{pack.title}</h2><p className="mt-2 text-sm text-slate-300">{pack.metadata.shortDescription}</p><div className="mt-4 flex flex-wrap gap-2 text-xs"><StatusPill label={`${cleared}/${total} cleared`} tone="cyan" /><StatusPill label={bossOpen ? "boss open" : "boss locked"} tone={bossOpen ? "gold" : "muted"} />{reviewDue ? <StatusPill label="review due" tone="purple" /> : null}</div><p className="mt-3 text-xs text-slate-400">Concepts: {pack.concepts.join(" · ")}</p></button>; })}
           </section>
+        ) : surface === "campaignDetail" ? (
+          <section className="rounded-3xl border border-purple-300/20 bg-slate-950/80 p-5"><div className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs uppercase tracking-[0.3em] text-purple-300">Campaign detail</p><h2 className="mt-2 text-3xl font-black">{selectedPack.title}</h2><p className="mt-2 max-w-3xl text-sm text-slate-300">{selectedPack.metadata.shortDescription}</p><div className="mt-3 flex flex-wrap gap-2 text-xs">{selectedPack.concepts.map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></div><button className="control" onClick={() => setSurface("campaigns")}>Back to campaigns</button></div><div className="grid gap-3 md:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">{[...selectedPack.quests, selectedPack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isBoss = challenge.id === selectedPack.boss.id; const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = cleared ? "cleared" : reviewDue ? "review due" : locked ? "locked" : isBoss ? "boss" : "available"; return <button key={challenge.id} className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${isBoss ? "border-pink-300/40 bg-pink-300/10" : "border-white/10 bg-white/5"}`} onClick={() => selectChallenge(challenge.id)}><p className="text-xs uppercase tracking-[0.25em] text-slate-400">{isBoss ? "Boss node" : `Quest node ${challenge.order ?? ""}`}</p><h3 className="mt-2 font-bold">{challenge.title}</h3><p className="mt-2 text-xs text-slate-400">{challenge.brief}</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={cleared ? "green" : reviewDue ? "purple" : locked ? "muted" : isBoss ? "pink" : "cyan"} />{isBoss ? <StatusPill label={locked ? "gate locked" : "gate open"} tone={locked ? "muted" : "gold"} /> : null}</div></button>; })}</div></section>
         ) : surface === "questions" ? (
-          <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Questions list</h2><p className="text-sm text-slate-400">Select a question to open the focused solve screen.</p></div><div className="flex gap-2 text-xs"><span className="control">All</span><span className="control">Available</span><span className="control">Cleared</span><span className="control">Review</span><span className="control">Boss</span></div></div><div className="grid gap-3 md:grid-cols-2">{CHALLENGES.map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); return <button key={challenge.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:border-cyan-300" onClick={() => selectChallenge(challenge.id)}><b>{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</b><p className="mt-1 text-xs text-slate-400">{challenge.packTitle} · {cleared ? "cleared" : locked ? "locked" : "available"} · {(progress.attempts[challenge.id] ?? []).length} attempts</p></button>; })}</div></section>
+          <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Questions list</h2><p className="text-sm text-slate-400">Select a question to open the focused solve screen.</p></div><div className="flex flex-wrap gap-2 text-xs">{(["All", "Available", "Cleared", "Review", "Boss"] as QuestionFilter[]).map((filter) => <button key={filter} className={questionFilter === filter ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setQuestionFilter(filter)}>{filter}</button>)}</div></div><div className="grid gap-3 md:grid-cols-2">{CHALLENGES.filter((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); if (questionFilter === "Available") return !locked && !cleared && !challenge.isBoss; if (questionFilter === "Cleared") return cleared; if (questionFilter === "Review") return reviewDue; if (questionFilter === "Boss") return challenge.isBoss; return true; }).map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = cleared ? "cleared" : reviewDue ? "review due" : locked ? "locked" : challenge.isBoss ? "boss" : "available"; return <button key={challenge.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:border-cyan-300" onClick={() => selectChallenge(challenge.id)}><b>{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</b><p className="mt-1 text-xs text-slate-400">{challenge.packTitle} · {(progress.attempts[challenge.id] ?? []).length} attempts</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={cleared ? "green" : reviewDue ? "purple" : locked ? "muted" : challenge.isBoss ? "pink" : "cyan"} />{challenge.packConcepts.slice(0, 2).map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></button>; })}</div></section>
         ) : (
           <div className="grid gap-6 xl:grid-cols-[19rem_minmax(420px,0.9fr)_minmax(520px,1.1fr)]">
             <div className="space-y-4">
@@ -473,6 +488,18 @@ export default function Home() {
       </section>
     </main>
   );
+}
+
+function StatusPill({ label, tone }: { label: string; tone: "cyan" | "gold" | "green" | "purple" | "pink" | "muted" }) {
+  const tones = {
+    cyan: "border-cyan-300/40 bg-cyan-300/10 text-cyan-100",
+    gold: "border-yellow-300/40 bg-yellow-300/10 text-yellow-100",
+    green: "border-emerald-300/40 bg-emerald-300/10 text-emerald-100",
+    purple: "border-purple-300/40 bg-purple-300/10 text-purple-100",
+    pink: "border-pink-300/40 bg-pink-300/10 text-pink-100",
+    muted: "border-slate-500/40 bg-slate-500/10 text-slate-300"
+  };
+  return <span className={`rounded-xl border px-2 py-1 ${tones[tone]}`}>{label}</span>;
 }
 
 function LibraryPanel({ progress, activeId, onSelect }: { progress: ProgressState; activeId: string; onSelect: (id: string) => void }) {
