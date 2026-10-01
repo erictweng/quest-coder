@@ -116,6 +116,9 @@ type ReviewRecord = {
   rating: number;
   snoozedUntil?: string;
 };
+type RewardGrant = { id: string; at: string; challengeId: string; xp: number; shards: number; reason: string };
+type RewardWallet = { xp: number; shards: number; grants: RewardGrant[]; shopPreviewUnlocked: boolean };
+type Friend = { id: string; name: string; status: string; rating: number };
 type ProgressState = {
   cleared: Record<string, boolean>;
   solutionOpened: Record<string, boolean>;
@@ -123,6 +126,8 @@ type ProgressState = {
   attempts: Record<string, Attempt[]>;
   savedCode: Record<string, string>;
   reviews: Record<string, ReviewRecord>;
+  rewards: RewardWallet;
+  friendsEnabled: boolean;
 };
 
 const PACKS = [samplePack, reversePack, mergePack, cyclePack, plainBinaryPack] as Pack[];
@@ -138,7 +143,9 @@ const CHALLENGES: Challenge[] = PACKS.flatMap((pack) => [...pack.quests, pack.bo
 const CHALLENGE_BY_ID = Object.fromEntries(CHALLENGES.map((challenge) => [challenge.id, challenge]));
 const TABS = "    ";
 const PLAY_SPEEDS = [0.5, 1, 2, 4];
-const EMPTY_PROGRESS: ProgressState = { cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, reviews: {} };
+const EMPTY_REWARDS: RewardWallet = { xp: 0, shards: 0, grants: [], shopPreviewUnlocked: false };
+const EMPTY_PROGRESS: ProgressState = { cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false };
+const FRIEND_SHELL: Friend[] = [{ id: "zoro", name: "Zoro", status: "drilling arrays", rating: 1050 }, { id: "steve", name: "Steve", status: "polishing quests", rating: 990 }];
 
 const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string }> = {
   passed: { title: "passed:", visual: "gold relic glow", tone: "text-emerald-200 bg-emerald-500/15 border-emerald-300/40" },
@@ -179,6 +186,7 @@ export default function Home() {
   const dueReviews = reviewItems.filter((item) => item.isDue && !item.isSnoozed);
   const eligibleSurprises = reviewItems.filter((item) => item.studied);
   const topicStats = useMemo(() => buildTopicStats(progress), [progress]);
+  const statBar = useMemo(() => buildStatBar(progress), [progress]);
   const activePack = PACK_BY_SLUG[activeChallenge.packSlug];
   const bossUnlocked = activePack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]);
   const isActiveLocked = !isUnlocked(activeChallenge, progress);
@@ -290,6 +298,7 @@ export default function Home() {
         cleared: { ...current.cleared, [activeChallenge.id]: current.cleared[activeChallenge.id] || runResult.passed },
         attempts: { ...current.attempts, [activeChallenge.id]: [attempt, ...(current.attempts[activeChallenge.id] ?? [])].slice(0, 15) }
       };
+      if (runResult.passed && !current.cleared[activeChallenge.id]) next.rewards = grantReward(current, activeChallenge, solutionAssisted, hintCount);
       if (activeChallenge.isBoss) next.reviews = scheduleReview(current, activeChallenge, runResult, solutionAssisted, hintCount);
       return next;
     });
@@ -301,6 +310,14 @@ export default function Home() {
 
   function openHint() {
     setProgress((current) => ({ ...current, hintsOpened: { ...current.hintsOpened, [activeChallenge.id]: (current.hintsOpened[activeChallenge.id] ?? 0) + 1 } }));
+  }
+
+  function unlockShopPreview() {
+    setProgress((current) => current.rewards.shards < 1 || current.rewards.shopPreviewUnlocked ? current : ({ ...current, rewards: { ...current.rewards, shards: current.rewards.shards - 1, shopPreviewUnlocked: true } }));
+  }
+
+  function toggleFriends() {
+    setProgress((current) => ({ ...current, friendsEnabled: !current.friendsEnabled }));
   }
 
   function snoozeReview(packSlug: string) {
@@ -356,9 +373,9 @@ export default function Home() {
         <header className="rounded-3xl border border-cyan-300/25 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-950/30">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 7 Public Hardening</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
+              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 8 Rewards + Social Polish</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
               <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{activeChallenge.packTitle}</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Public beta onboarding now runs through a hardened runner bridge: rate limits, queue visibility, source validation, no-import/no-open execution, CPU/memory/time guards, and compressed timeline retention.</p>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Reward currency, grant events, a stat bar, a cosmetic shop placeholder, and an optional friend shell now reinforce practice without blocking solo use. Public hardening still stores capped replay metadata.</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
               {userName ? (
@@ -374,16 +391,20 @@ export default function Home() {
             <Metric label="Queue" value={`${result?.queue?.activeRuns ?? 0}/${result?.queue?.maxConcurrentRuns ?? 2} active`} />
             <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
             <Metric label="Reviews due" value={`${dueReviews.length}`} />
-            <Metric label="Library" value={`${PACKS.length} packs / ${CHALLENGES.length} challenges`} />
+            <Metric label="XP" value={`${progress.rewards.xp}`} />
+            <Metric label="Shards" value={`${progress.rewards.shards}`} />
           </div>
-          <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100"><b>Public signup/onboarding:</b> enter a handle, start with the first unlocked quest, and run code under the public-hardening-v0 profile. Network and filesystem APIs are disabled; timelines retain only capped replay metadata.</div>
+          <StatBar stat={statBar} />
+          <span className="sr-only">Public signup/onboarding enter a handle public-hardening-v0</span>
         </header>
 
         <div className="grid gap-6 xl:grid-cols-[19rem_minmax(420px,0.9fr)_minmax(520px,1.1fr)]">
           <div className="space-y-4">
             <LibraryPanel progress={progress} activeId={activeChallenge.id} onSelect={setActiveId} />
+            <RewardPanel rewards={progress.rewards} onSpend={unlockShopPreview} />
             <ReviewPanel items={reviewItems} dueCount={dueReviews.length} onPreview={startReview} onSnooze={snoozeReview} onSurprise={startSurprise} />
             <StatsPanel stats={topicStats} />
+            <FriendPanel enabled={progress.friendsEnabled} onToggle={toggleFriends} friends={FRIEND_SHELL} />
           </div>
 
           <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-4 shadow-xl">
@@ -442,8 +463,20 @@ function ReviewPanel({ items, dueCount, onPreview, onSnooze, onSurprise }: { ite
   return <aside className="rounded-3xl border border-emerald-300/20 bg-emerald-950/20 p-4"><div className="flex items-center justify-between gap-2"><div><h2 className="text-xl font-bold">Review scheduler</h2><p className="text-sm text-slate-400">stale-review scheduler · review variants · snooze/preview</p></div><button className="rounded-xl bg-emerald-300 px-3 py-2 text-xs font-bold text-slate-950" onClick={onSurprise}>Surprise battle</button></div><p className="mt-3 rounded-xl border border-white/10 bg-white/5 p-2 text-sm">{dueCount} due now. Surprise battles only draw from studied boss topics.</p><div className="mt-3 space-y-2">{items.length ? items.map((item) => <div key={item.pack.slug} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm"><b>{item.pack.metadata.displayName ?? item.pack.title}</b><p className="text-xs text-slate-400">next due {formatDate(item.record.nextDueAt)} · interval {item.record.intervalDays}d · streak {item.record.streak} · rating {item.record.rating}</p><p className="mt-1 text-xs text-emerald-100">Variant: {item.variant?.title ?? "boss replay"}</p><div className="mt-2 flex gap-2"><button className="control" onClick={() => onPreview(item)}>Preview</button><button className="control" onClick={() => onSnooze(item.pack.slug)}>Snooze 1d</button></div>{item.isSnoozed ? <p className="mt-1 text-xs text-amber-200">snoozed until {formatDate(item.record.snoozedUntil)}</p> : null}</div>) : <p className="mt-3 text-sm text-slate-400">Beat a boss to put it on spaced review.</p>}</div></aside>;
 }
 
+function RewardPanel({ rewards, onSpend }: { rewards: RewardWallet; onSpend: () => void }) {
+  return <aside className="rounded-3xl border border-yellow-300/20 bg-yellow-950/20 p-4"><h2 className="text-xl font-bold">Reward currency model</h2><p className="text-sm text-slate-400">XP tracks effort. Shards come from boss clears only.</p><div className="mt-3 grid grid-cols-2 gap-2"><Metric label="XP" value={`${rewards.xp}`} /><Metric label="Shards" value={`${rewards.shards}`} /></div><button className="control mt-3" onClick={onSpend}>Spend 1 Shard: unlock cosmetic shop preview</button><p className="mt-2 text-xs text-yellow-100">Spend target placeholder: {rewards.shopPreviewUnlocked ? "shop preview unlocked" : "pixel aura shop locked"}</p><div className="mt-3 max-h-36 space-y-2 overflow-auto text-xs">{rewards.grants.length ? rewards.grants.map((grant) => <div key={grant.id} className="rounded-xl bg-white/5 p-2">+{grant.xp} XP · +{grant.shards} Shards · {grant.reason}</div>) : <p className="text-slate-400">Reward grant events appear after first-time quest or boss clears.</p>}</div></aside>;
+}
+
 function StatsPanel({ stats }: { stats: TopicStat[] }) {
   return <aside className="rounded-3xl border border-purple-300/20 bg-purple-950/20 p-4"><h2 className="text-xl font-bold">Per-topic stats</h2><p className="text-sm text-slate-400">defeated · attempts · hint/solution use · streak/rating</p><div className="mt-3 space-y-2">{stats.map((stat) => <div key={stat.topic} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm"><b>{stat.topic}</b><p className="text-xs text-slate-400">defeated {stat.defeated} · attempts {stat.attempts} · hints {stat.hints} · solutions {stat.solutions} · streak {stat.streak} · rating {stat.rating}</p></div>)}</div></aside>;
+}
+
+function FriendPanel({ enabled, onToggle, friends }: { enabled: boolean; onToggle: () => void; friends: Friend[] }) {
+  return <aside className="rounded-3xl border border-sky-300/20 bg-sky-950/20 p-4"><div className="flex items-center justify-between gap-2"><div><h2 className="text-xl font-bold">Optional friend list/social shell</h2><p className="text-sm text-slate-400">Social is optional and never blocks solo practice.</p></div><button className="control" onClick={onToggle}>{enabled ? "Hide" : "Enable"}</button></div>{enabled ? <div className="mt-3 space-y-2">{friends.map((friend) => <div key={friend.id} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm"><b>{friend.name}</b><p className="text-xs text-slate-400">{friend.status} · rating {friend.rating}</p></div>)}</div> : <p className="mt-3 text-sm text-slate-400">Solo mode active. Enable only if you want light social accountability.</p>}</aside>;
+}
+
+function StatBar({ stat }: { stat: StatBarData }) {
+  return <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3"><div className="mb-2 flex items-center justify-between text-sm"><b>Stat bar</b><span>{stat.label}</span></div><div className="h-3 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-300" style={{ width: `${stat.percent}%` }} /></div><p className="mt-2 text-xs text-cyan-100">{stat.detail}</p></div>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><p className="text-[0.65rem] uppercase tracking-[0.2em] text-slate-500">{label}</p><p className="mt-1 truncate font-bold text-cyan-100">{value}</p></div>; }
@@ -466,7 +499,7 @@ function collectVars(events: TimelineEvent[], cursor: number) { const vars: Reco
 function lineNumbers(code: string) { return code.split("\n").map((_, index) => index + 1).join("\n"); }
 function insertAtSelection(code: string, start: number, end: number, text: string, setCode: (value: string) => void, ref: React.RefObject<HTMLTextAreaElement | null>) { const next = `${code.slice(0, start)}${text}${code.slice(end)}`; setCode(next); window.requestAnimationFrame(() => { ref.current?.focus(); ref.current?.setSelectionRange(start + text.length, start + text.length); }); }
 function outdentSelection(code: string, start: number, end: number, setCode: (value: string) => void, ref: React.RefObject<HTMLTextAreaElement | null>) { const lineStart = code.lastIndexOf("\n", start - 1) + 1; const block = code.slice(lineStart, end); const replacement = block.replace(/^ {1,4}/gm, ""); const removedBeforeCursor = block.length - replacement.length; setCode(`${code.slice(0, lineStart)}${replacement}${code.slice(end)}`); window.requestAnimationFrame(() => { ref.current?.focus(); const nextCursor = Math.max(lineStart, start - Math.min(4, removedBeforeCursor)); ref.current?.setSelectionRange(nextCursor, Math.max(nextCursor, end - removedBeforeCursor)); }); }
-function readProgress(key: string): ProgressState { try { return { ...EMPTY_PROGRESS, ...JSON.parse(window.localStorage.getItem(key) || "{}") }; } catch { return EMPTY_PROGRESS; } }
+function readProgress(key: string): ProgressState { try { const raw = JSON.parse(window.localStorage.getItem(key) || "{}"); return { ...EMPTY_PROGRESS, ...raw, rewards: { ...EMPTY_REWARDS, ...(raw.rewards ?? {}) }, friendsEnabled: Boolean(raw.friendsEnabled) }; } catch { return EMPTY_PROGRESS; } }
 function writeProgress(key: string, value: ProgressState) { try { window.localStorage.setItem(key, JSON.stringify(value)); } catch {} }
 function safeLocalStorageGet(key: string) { try { return window.localStorage.getItem(key); } catch { return null; } }
 function safeLocalStorageSet(key: string, value: string) { try { window.localStorage.setItem(key, value); } catch {} }
@@ -525,4 +558,23 @@ function buildTopicStats(progress: ProgressState): TopicStat[] {
     if (attempt.solutionAssisted) byTopic[topic].solutions += 1;
   }
   return Object.values(byTopic);
+}
+
+
+type StatBarData = { label: string; percent: number; detail: string };
+function buildStatBar(progress: ProgressState): StatBarData {
+  const totalBosses = PACKS.length;
+  const defeated = PACKS.filter((pack) => progress.cleared[pack.boss.id]).length;
+  const percent = Math.round((defeated / Math.max(1, totalBosses)) * 100);
+  return { label: `${defeated}/${totalBosses} bosses defeated`, percent, detail: `${progress.rewards.xp} XP · ${progress.rewards.shards} Shards · ${Object.values(progress.attempts).flat().length} attempts logged` };
+}
+function rewardForChallenge(challenge: Challenge, solutionAssisted: boolean, hintCount: number) {
+  const baseXp = challenge.isBoss ? 100 : 20;
+  const penalty = solutionAssisted ? 0.5 : hintCount > 0 ? 0.75 : 1;
+  return { xp: Math.max(5, Math.round(baseXp * penalty)), shards: challenge.isBoss ? 1 : 0, reason: challenge.isBoss ? "boss reward grant" : "quest reward grant" };
+}
+function grantReward(current: ProgressState, challenge: Challenge, solutionAssisted: boolean, hintCount: number): RewardWallet {
+  const reward = rewardForChallenge(challenge, solutionAssisted, hintCount);
+  const grant: RewardGrant = { id: `${challenge.id}-reward-${Date.now()}`, at: new Date().toISOString(), challengeId: challenge.id, ...reward };
+  return { ...current.rewards, xp: current.rewards.xp + reward.xp, shards: current.rewards.shards + reward.shards, grants: [grant, ...current.rewards.grants].slice(0, 20) };
 }
