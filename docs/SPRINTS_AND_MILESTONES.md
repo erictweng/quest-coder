@@ -169,6 +169,25 @@ Acceptance criteria:
 - Reward outcomes are visible after quests/bosses.
 - Social features are optional and do not block solo use.
 
+## Sprint 9 — Public launch / beta release
+
+Goal: make the completed MVP deployable and shareable as a public beta.
+
+Milestones:
+- Deployment target configuration.
+- Public launch checklist.
+- Health/readiness endpoint.
+- SEO/indexing controls.
+- Launch docs and rollback plan.
+- Final full-sprint verification gate.
+
+Acceptance criteria:
+- App has repeatable deployment instructions and provider config.
+- `/api/health` reports launch-readiness metadata.
+- Indexing is blocked by default and explicitly configurable.
+- Launch checklist covers post-deploy smoke checks and rollback.
+- Full Sprint 2–9 gate passes locally before deploy.
+
 ## Critical path
 
 1. Stack decision.

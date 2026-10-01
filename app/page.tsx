@@ -373,9 +373,9 @@ export default function Home() {
         <header className="rounded-3xl border border-cyan-300/25 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-950/30">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 8 Rewards + Social Polish</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
+              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 9 Public Beta Launch</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
               <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{activeChallenge.packTitle}</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Reward currency, grant events, a stat bar, a cosmetic shop placeholder, and an optional friend shell now reinforce practice without blocking solo use. Public hardening still stores capped replay metadata.</p>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Public beta launch readiness is wired: deployment config, health checks, robots/sitemap controls, launch checklist, rollback plan, rewards, and optional social polish.</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
               {userName ? (
@@ -395,7 +395,7 @@ export default function Home() {
             <Metric label="Shards" value={`${progress.rewards.shards}`} />
           </div>
           <StatBar stat={statBar} />
-          <span className="sr-only">Public signup/onboarding enter a handle public-hardening-v0</span>
+          <span className="sr-only">Public signup/onboarding enter a handle public-hardening-v0 capped replay metadata</span>
         </header>
 
         <div className="grid gap-6 xl:grid-cols-[19rem_minmax(420px,0.9fr)_minmax(520px,1.1fr)]">
