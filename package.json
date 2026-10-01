@@ -9,7 +9,8 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test:runner": "python3 -m unittest runner.tests.test_smoke -v",
-    "smoke:sprint2": "node scripts/sprint2-smoke.mjs"
+    "smoke:sprint2": "node scripts/sprint2-smoke.mjs",
+    "smoke:sprint3": "node scripts/sprint3-smoke.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "latest",

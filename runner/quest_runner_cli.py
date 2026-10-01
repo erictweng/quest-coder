@@ -1,19 +1,52 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from runner.quest_runner import default_rotated_budget, run_submission
+from runner.quest_runner import run_submission
 
-DEFAULT_TESTS: list[dict[str, Any]] = [
-    {"id": "small-found", "input": {"nums": [4, 5, 6, 7, 0, 1, 2], "target": 0}, "expected": 4},
-    {"id": "small-missing", "input": {"nums": [4, 5, 6, 7, 0, 1, 2], "target": 3}, "expected": -1},
-    {"id": "large-found", "input": {"nums": list(range(96, 256)) + list(range(96)), "target": 95}, "expected": 255},
-]
+
+def default_tests() -> list[dict[str, Any]]:
+    return [
+        {"id": "small-found", "input": {"nums": [4, 5, 6, 7, 0, 1, 2], "target": 0}, "expected": 4},
+        {"id": "small-missing", "input": {"nums": [4, 5, 6, 7, 0, 1, 2], "target": 3}, "expected": -1},
+        {"id": "large-found", "input": {"nums": list(range(96, 256)) + list(range(96)), "target": 95}, "expected": 255},
+    ]
+
+
+def default_rotated_budget(n: int) -> int:
+    return 4 * math.ceil(math.log2(n + 1)) + 16
+
+
+def budget_limit(challenge: dict[str, Any], tests: list[dict[str, Any]]) -> int | None:
+    budget = challenge.get("budget", {})
+    if not budget.get("enabled"):
+        return None
+    if "absoluteLimit" in budget:
+        return int(budget["absoluteLimit"])
+    max_n = max((len(test.get("input", {}).get("nums", [])) for test in tests), default=1)
+    return default_rotated_budget(max_n)
+
+
+def challenge_from_pack(pack: dict[str, Any], challenge_id: str) -> dict[str, Any]:
+    for challenge in [*pack.get("quests", []), pack.get("boss")]:
+        if isinstance(challenge, dict) and challenge.get("id") == challenge_id:
+            return challenge
+    raise ValueError(f"challenge not found: {challenge_id}")
+
+
+def load_pack_challenge(pack_path: str, challenge_id: str) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    pack = json.loads(Path(pack_path).read_text())
+    challenge = challenge_from_pack(pack, challenge_id)
+    tests = list(challenge.get("tests", {}).get("fixed", []))
+    if not tests:
+        raise ValueError(f"challenge has no fixed tests: {challenge_id}")
+    return pack, challenge, tests
 
 
 def main() -> int:
@@ -22,14 +55,33 @@ def main() -> int:
         source = payload["source"]
         if not isinstance(source, str) or not source.strip():
             raise ValueError("source must be a non-empty string")
+
+        if "packPath" in payload or "challengeId" in payload:
+            pack, challenge, tests = load_pack_challenge(
+                str(payload.get("packPath", "content/packs/timequake-search-rotated-array.json")),
+                str(payload.get("challengeId", "boss-search")),
+            )
+            timeout_ms = int(pack.get("runtime", {}).get("timeLimitMs", 2000))
+            max_events = int(pack.get("runtime", {}).get("timelineEventCap", 3000))
+            quest_id = challenge["id"]
+            entrypoint = challenge["entrypoint"]
+            limit = budget_limit(challenge, tests)
+        else:
+            tests = default_tests()
+            timeout_ms = 2000
+            max_events = 3000
+            quest_id = "timequake-search-rotated-array"
+            entrypoint = "Solution().search"
+            limit = default_rotated_budget(256)
+
         result = run_submission(
             source,
-            DEFAULT_TESTS,
-            quest_id="timequake-search-rotated-array",
-            entrypoint="Solution().search",
-            budget_limit=default_rotated_budget(256),
-            timeout_ms=2000,
-            max_events=3000,
+            tests,
+            quest_id=quest_id,
+            entrypoint=entrypoint,
+            budget_limit=limit,
+            timeout_ms=timeout_ms,
+            max_events=max_events,
         )
         print(json.dumps(result))
         return 0

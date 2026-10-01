@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quest-coder.local/schemas/quest-pack.schema.json",
+  "title": "Quest Coder Quest Pack",
+  "type": "object",
+  "required": ["schemaVersion", "id", "slug", "title", "status", "metadata", "story", "concepts", "runtime", "scene", "quests", "boss", "review", "rewards", "validation"],
+  "properties": {
+    "schemaVersion": { "const": "quest-pack.v0" },
+    "id": { "type": "string", "minLength": 1 },
+    "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "title": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["draft", "validated", "published"] },
+    "metadata": {
+      "type": "object",
+      "required": ["displayName", "shortDescription", "difficulty", "originalTextConfirmed", "authors", "createdAt", "updatedAt"],
+      "properties": {
+        "displayName": { "type": "string" },
+        "shortDescription": { "type": "string" },
+        "difficulty": { "enum": ["easy", "medium", "hard"] },
+        "sourceInspiredBy": { "type": "string" },
+        "originalTextConfirmed": { "type": "boolean" },
+        "authors": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "story": { "type": "object", "required": ["worldName", "premise", "playerRole", "dataMetaphor", "victoryText", "failureText"] },
+    "concepts": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "runtime": { "type": "object", "required": ["language", "signature", "entrypoint", "timeLimitMs", "timelineEventCap"] },
+    "scene": {
+      "type": "object",
+      "required": ["type", "renderer", "trackedVariables", "outcomeVisuals"],
+      "properties": {
+        "type": { "enum": ["array", "linked_list", "tree", "graph", "custom"] },
+        "renderer": { "type": "string" },
+        "trackedVariables": { "type": "array", "items": { "type": "string" } },
+        "outcomeVisuals": {
+          "type": "object",
+          "required": ["passed", "wrong_answer", "compile_error", "runtime_error", "over_budget", "loop_guard", "off_end_read"]
+        }
+      }
+    },
+    "quests": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "$ref": "#/$defs/challenge" } },
+    "boss": { "$ref": "#/$defs/challenge" },
+    "review": { "type": "object", "required": ["enabled", "defaultSchedule", "variants", "rules"] },
+    "rewards": { "type": "object", "required": ["xp", "currency"] },
+    "validation": { "type": "object", "required": ["referenceMustPass", "requiredOutcomeFixtures", "maxTimelineEvents", "originalTextChecklist"] }
+  },
+  "$defs": {
+    "challenge": {
+      "type": "object",
+      "required": ["id", "title", "brief", "signature", "entrypoint", "starterCode", "tests", "budget", "solution", "unlock", "rewards"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "order": { "type": "integer" },
+        "title": { "type": "string" },
+        "brief": { "type": "string" },
+        "learningGoal": { "type": "string" },
+        "signature": { "type": "string" },
+        "entrypoint": { "type": "string" },
+        "starterCode": { "type": "string" },
+        "hints": { "type": "array" },
+        "solution": { "type": "object", "required": ["code", "explanation", "complexity"] },
+        "tests": { "type": "object", "required": ["fixed", "replayCaseIds"] },
+        "budget": { "type": "object", "required": ["enabled", "unit", "failureMode"] },
+        "unlock": { "type": "object", "required": ["requiresQuestIds", "requiresPassed"] },
+        "rewards": { "type": "object" }
+      }
+    }
+  }
+}

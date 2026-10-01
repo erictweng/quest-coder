@@ -55,9 +55,8 @@ type RunResult = {
   limits: { maxEvents: number; maxDurationMs: number; maxReads?: number };
 };
 
-const STARTER_CODE = `class Solution:\n    def search(self, nums: List[int], target: int) -> int:\n        # Find target in the rotated sorted hallway.\n        pass\n`;
-
-const PASSING_CODE = `class Solution:\n    def search(self, nums: List[int], target: int) -> int:\n        l = 0\n        r = len(nums) - 1\n        while l <= r:\n            mid = (l + r) // 2\n            if nums[mid] == target:\n                return mid\n            if nums[l] <= nums[mid]:\n                if nums[l] <= target < nums[mid]:\n                    r = mid - 1\n                else:\n                    l = mid + 1\n            else:\n                if nums[mid] < target <= nums[r]:\n                    l = mid + 1\n                else:\n                    r = mid - 1\n        return -1\n`;
+const STARTER_CODE = samplePack.boss.starterCode;
+const PASSING_CODE = samplePack.boss.solution.code;
 
 const TABS = "    ";
 const PLAY_SPEEDS = [0.5, 1, 2, 4];

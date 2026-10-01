@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
-import path from "node:path";
 import { NextResponse } from "next/server";
+import { findChallenge, loadQuestPack, packPath } from "../../../lib/quests";
 
 const RUNNER_TIMEOUT_MS = 7000;
 
 type RunRequest = {
   source?: unknown;
+  packSlug?: unknown;
+  challengeId?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -14,9 +16,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "source must be a non-empty Python string" }, { status: 400 });
   }
 
+  const packSlugValue = typeof body.packSlug === "string" ? body.packSlug : "timequake-search-rotated-array";
+  const challengeIdValue = typeof body.challengeId === "string" ? body.challengeId : "boss-search";
+
   try {
-    const result = await runQuestRunner(body.source);
-    return NextResponse.json(result);
+    const pack = loadQuestPack(packSlugValue);
+    const challenge = findChallenge(pack, challengeIdValue);
+    const result = await runQuestRunner({
+      source: body.source,
+      packPath: packPath(packSlugValue),
+      challengeId: challenge.id
+    });
+    return NextResponse.json({ ...result, pack: { id: pack.id, slug: pack.slug, title: pack.title }, challenge: { id: challenge.id, title: challenge.title } });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "runner bridge failed" },
@@ -25,11 +36,10 @@ export async function POST(request: Request) {
   }
 }
 
-function runQuestRunner(source: string) {
-  return new Promise((resolve, reject) => {
+function runQuestRunner(payload: { source: string; packPath: string; challengeId: string }) {
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
     const repoRoot = process.cwd();
-    const runnerPath = path.join(repoRoot, "runner", "quest_runner_cli.py");
-    const child = spawn("python3", [runnerPath], {
+    const child = spawn("python3", ["runner/quest_runner_cli.py"], {
       cwd: repoRoot,
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -58,12 +68,12 @@ function runQuestRunner(source: string) {
         return;
       }
       try {
-        resolve(JSON.parse(stdout));
+        resolve(JSON.parse(stdout) as Record<string, unknown>);
       } catch (error) {
         reject(new Error(`runner returned invalid JSON: ${error instanceof Error ? error.message : "parse failed"}`));
       }
     });
 
-    child.stdin.end(JSON.stringify({ source }));
+    child.stdin.end(JSON.stringify(payload));
   });
 }
