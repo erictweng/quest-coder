@@ -27,7 +27,7 @@ milestone("Landing hub avoids default editor overload", () => {
   assert(solveIndex > -1, "solve branch missing");
   assert(hubIndex < solveIndex, "hub should render before solve branch");
   const hubBranch = page.slice(hubIndex, solveIndex);
-  for (const token of ["Profile", "Campaign", "Questions", "Continue last quest", "compiler when the quest starts"]) {
+  for (const token of ["Profile", "Campaign", "Questions", "Continue Last Quest", "compiler when the quest starts"]) {
     assert(hubBranch.includes(token), `hub branch missing ${token}`);
   }
   assert(!hubBranch.includes("textarea"), "hub branch should not render the code editor");

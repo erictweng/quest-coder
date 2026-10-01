@@ -380,9 +380,9 @@ export default function Home() {
         <header className="rounded-3xl border border-cyan-300/25 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-950/30">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 10 IA Shell</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
+              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 11 Hub + Profile Entry</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater</span>
               <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{surface === "solve" ? activeChallenge.packTitle : "Choose your path"}</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Profile, Campaign, and Questions now form the first-level flow. The full compiler/replay workspace only opens after a question is selected.</p>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">The hub is now calm and action-oriented: choose Profile, Campaign, or Questions, then open the compiler only when a quest starts.</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
               {userName ? (
@@ -401,6 +401,8 @@ export default function Home() {
           </nav>
           <div className="mt-4 grid gap-2 text-sm sm:grid-cols-5">
             <Metric label="Surface" value={surface} />
+            <Metric label="Streak/rating" value={`${topicStats[0]?.streak ?? 0}/${topicStats[0]?.rating ?? 1000}`} />
+            <Metric label="Bosses defeated" value={statBar.label} />
             <Metric label="Active quest" value={activeChallenge.title} />
             <Metric label="Queue" value={`${result?.queue?.activeRuns ?? 0}/${result?.queue?.maxConcurrentRuns ?? 2} active`} />
             <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
@@ -413,22 +415,26 @@ export default function Home() {
         </header>
 
         {surface === "hub" ? (
-          <section className="grid gap-4 lg:grid-cols-3">
-            <button className="rounded-3xl border border-cyan-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-cyan-300/10" onClick={() => setSurface("profile")}>
-              <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Profile</p><h2 className="mt-3 text-2xl font-black">Save file</h2><p className="mt-2 text-sm text-slate-300">XP, Shards, review due count, recent attempts, and solo/social settings.</p>
-            </button>
-            <button className="rounded-3xl border border-purple-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-purple-300/10" onClick={() => setSurface("campaigns")}>
-              <p className="text-xs uppercase tracking-[0.3em] text-purple-300">Campaign</p><h2 className="mt-3 text-2xl font-black">Quest map</h2><p className="mt-2 text-sm text-slate-300">Pick a topic world before the compiler appears.</p>
-            </button>
-            <button className="rounded-3xl border border-yellow-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-yellow-300/10" onClick={() => setSurface("questions")}>
-              <p className="text-xs uppercase tracking-[0.3em] text-yellow-300">Questions</p><h2 className="mt-3 text-2xl font-black">Quest board</h2><p className="mt-2 text-sm text-slate-300">Choose an available quest, review, or boss fight.</p>
-            </button>
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-5 lg:col-span-2"><h2 className="text-xl font-bold">Companion</h2><p className="mt-2 text-slate-300">“Pick a path first. I’ll open the compiler when the quest starts.”</p></div>
-            <button className="rounded-3xl border border-emerald-300/25 bg-emerald-300/10 p-5 text-left" onClick={() => selectChallenge(activeChallenge.id)}><b>Continue last quest</b><p className="mt-1 text-sm text-emerald-100">{activeChallenge.title}</p></button>
+          <section className="space-y-5">
+            <div className="rounded-3xl border border-yellow-300/25 bg-yellow-300/10 p-5 shadow-xl">
+              <div className="flex items-start gap-4"><div className="grid h-14 w-14 place-items-center rounded-2xl border border-yellow-200/50 bg-slate-950 text-2xl">▣</div><div><h2 className="text-xl font-black text-yellow-100">Pixel companion</h2><p className="mt-1 text-slate-200">“Pick a path first. I’ll open the compiler when the quest starts.”</p></div></div>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <button className="rounded-3xl border border-cyan-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-cyan-300/10" onClick={() => setSurface("profile")}>
+                <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Profile</p><h2 className="mt-3 text-2xl font-black">Save file</h2><p className="mt-2 text-sm text-slate-300">XP, Shards, review due count, recent attempts, and solo/social settings.</p><p className="mt-4 text-xs text-cyan-100">{progress.rewards.xp} XP · {progress.rewards.shards} Shards · {dueReviews.length} reviews due</p>
+              </button>
+              <button className="rounded-3xl border border-purple-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-purple-300/10" onClick={() => setSurface("campaigns")}>
+                <p className="text-xs uppercase tracking-[0.3em] text-purple-300">Campaign</p><h2 className="mt-3 text-2xl font-black">Quest map</h2><p className="mt-2 text-sm text-slate-300">Pick a topic world before the compiler appears.</p><p className="mt-4 text-xs text-purple-100">{PACKS.length} worlds · {statBar.label}</p>
+              </button>
+              <button className="rounded-3xl border border-yellow-300/25 bg-slate-950/80 p-6 text-left shadow-xl hover:bg-yellow-300/10" onClick={() => setSurface("questions")}>
+                <p className="text-xs uppercase tracking-[0.3em] text-yellow-300">Questions</p><h2 className="mt-3 text-2xl font-black">Quest board</h2><p className="mt-2 text-sm text-slate-300">Choose an available quest, review, or boss fight.</p><p className="mt-4 text-xs text-yellow-100">{CHALLENGES.length} quests and bosses</p>
+              </button>
+            </div>
+            <button className="w-full rounded-3xl border border-emerald-300/25 bg-emerald-300/10 p-5 text-left shadow-xl" onClick={() => selectChallenge(activeChallenge.id)}><b>Continue Last Quest</b><p className="mt-1 text-sm text-emerald-100">{activeChallenge.title} · opens the focused solve screen</p></button>
           </section>
         ) : surface === "profile" ? (
           <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-            <div className="rounded-3xl border border-cyan-300/20 bg-slate-950/80 p-5"><h2 className="text-2xl font-black">Profile save file</h2><p className="mt-2 text-slate-300">{userName ?? "Guest"} · {progress.rewards.xp} XP · {progress.rewards.shards} Shards · {dueReviews.length} reviews due</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><Metric label="Bosses defeated" value={statBar.label} /><Metric label="Attempts logged" value={`${Object.values(progress.attempts).flat().length}`} /></div></div>
+            <div className="rounded-3xl border border-cyan-300/20 bg-slate-950/80 p-5"><h2 className="text-2xl font-black">Profile save file</h2><p className="mt-2 text-slate-300">{userName ?? "Guest"} · {progress.rewards.xp} XP · {progress.rewards.shards} Shards · {dueReviews.length} reviews due</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><Metric label="Bosses defeated" value={statBar.label} /><Metric label="Attempts logged" value={`${Object.values(progress.attempts).flat().length}`} /></div><div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3"><h3 className="font-bold">Recent attempts</h3><div className="mt-2 space-y-2 text-xs">{Object.values(progress.attempts).flat().slice(0, 4).length ? Object.values(progress.attempts).flat().slice(0, 4).map((attempt) => <p key={attempt.id} className="rounded-xl bg-slate-950/70 p-2">{attempt.challengeId} · {attempt.status} · {attempt.solutionAssisted ? "solution-assisted" : "unassisted"}</p>) : <p className="text-slate-400">No attempts logged yet.</p>}</div></div><div className="mt-4 rounded-2xl border border-purple-300/20 bg-purple-300/5 p-3"><h3 className="font-bold">Review reminders</h3><p className="mt-1 text-sm text-slate-300">{dueReviews.length ? `${dueReviews.length} rematch queued.` : "No reviews due. Beat a boss to start spaced rematches."}</p></div></div>
             <div className="space-y-4"><RewardPanel rewards={progress.rewards} onSpend={unlockShopPreview} /><FriendPanel enabled={progress.friendsEnabled} onToggle={toggleFriends} friends={FRIEND_SHELL} /></div>
           </section>
         ) : surface === "campaigns" ? (
