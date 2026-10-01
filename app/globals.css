@@ -20,3 +20,14 @@ textarea {
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
 }
+
+.control {
+  border-radius: 0.75rem;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  padding: 0.5rem 0.75rem;
+}
+
+.control:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+

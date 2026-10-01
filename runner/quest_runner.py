@@ -272,6 +272,17 @@ def wrap_inputs(inputs: Dict[str, Any], recorder: Recorder) -> Dict[str, Any]:
     return wrapped
 
 
+def replay_input_from_test(test: Dict[str, Any]) -> Dict[str, Any]:
+    inputs = test.get("input", {})
+    values = inputs.get("nums", [])
+    return {
+        "structure": "array",
+        "values": make_jsonable(values),
+        "target": make_jsonable(inputs.get("target")),
+        "expectedIndex": make_jsonable(test.get("expected")),
+    }
+
+
 def run_one_case(
     source: str,
     test: Dict[str, Any],
@@ -352,6 +363,7 @@ def run_one_case(
             "truncated": recorder.truncated,
             "memoryKb": memory_kb,
         },
+        "input": replay_input_from_test(test),
         "events": recorder.events,
     }
 
