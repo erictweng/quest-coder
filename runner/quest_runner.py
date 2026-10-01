@@ -48,6 +48,37 @@ class DummySubscriptable:
         return self
 
 
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional["ListNode"] = None, recorder: Optional["Recorder"] = None, node_id: Optional[str] = None):
+        object.__setattr__(self, "_val", val)
+        object.__setattr__(self, "_next", next)
+        object.__setattr__(self, "_recorder", recorder)
+        object.__setattr__(self, "_node_id", node_id or f"node-{id(self)}")
+
+    @property
+    def val(self) -> int:
+        recorder = object.__getattribute__(self, "_recorder")
+        if recorder:
+            recorder.node_read(object.__getattribute__(self, "_node_id"), "val", object.__getattribute__(self, "_val"))
+        return object.__getattribute__(self, "_val")
+
+    @val.setter
+    def val(self, value: int) -> None:
+        object.__setattr__(self, "_val", value)
+
+    @property
+    def next(self) -> Optional["ListNode"]:
+        recorder = object.__getattribute__(self, "_recorder")
+        nxt = object.__getattribute__(self, "_next")
+        if recorder:
+            recorder.node_read(object.__getattribute__(self, "_node_id"), "next", node_to_list(nxt, limit=20) if nxt else None)
+        return nxt
+
+    @next.setter
+    def next(self, value: Optional["ListNode"]) -> None:
+        object.__setattr__(self, "_next", value)
+
+
 @dataclass
 class Recorder:
     enabled: bool
@@ -87,6 +118,18 @@ class Recorder:
         else:
             self.off_end_read = event
         self.add(event)
+
+    def node_read(self, node_id: str, field: str, value: Any = None) -> None:
+        self.read_count += 1
+        frame = first_user_frame()
+        self.add({
+            "kind": "read",
+            "line": frame.f_lineno if frame else None,
+            "ref": {"structure": "linked_list", "name": "list", "nodeId": node_id, "field": field},
+            "value": make_jsonable(value),
+            "readCount": self.read_count,
+            "vars": capture_vars(frame) if frame else {},
+        })
 
     def outcome(self, status: str, expected: Any = None, actual: Any = None, message: str = "") -> None:
         event: Dict[str, Any] = {"kind": "outcome", "status": status, "message": message}
@@ -163,6 +206,8 @@ class CountingList:
 def make_jsonable(value: Any) -> Any:
     if isinstance(value, CountingList):
         return value.raw()
+    if isinstance(value, ListNode):
+        return node_to_list(value)
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, (list, tuple)):
@@ -170,6 +215,30 @@ def make_jsonable(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(k): make_jsonable(v) for k, v in value.items()}
     return repr(value)
+
+
+def list_to_nodes(values: PyList[Any], recorder: Recorder, prefix: str = "node", cycle_pos: Optional[int] = None) -> Optional[ListNode]:
+    nodes = [ListNode(value, None, recorder, f"{prefix}-{index}") for index, value in enumerate(values)]
+    for left, right in zip(nodes, nodes[1:]):
+        object.__setattr__(left, "_next", right)
+    if nodes and cycle_pos is not None and 0 <= cycle_pos < len(nodes):
+        object.__setattr__(nodes[-1], "_next", nodes[cycle_pos])
+    return nodes[0] if nodes else None
+
+
+def node_to_list(node: Optional[ListNode], limit: int = 100) -> PyList[Any]:
+    values: PyList[Any] = []
+    seen: set[int] = set()
+    current = node
+    while current is not None and len(values) < limit:
+        identity = id(current)
+        if identity in seen:
+            values.append("cycle")
+            break
+        seen.add(identity)
+        values.append(object.__getattribute__(current, "_val"))
+        current = object.__getattribute__(current, "_next")
+    return values
 
 
 def capture_vars(frame: Optional[FrameType]) -> Dict[str, Any]:
@@ -219,6 +288,7 @@ def build_namespace(source: str) -> Dict[str, Any]:
     namespace: Dict[str, Any] = {
         "List": DummySubscriptable(),
         "Optional": DummySubscriptable(),
+        "ListNode": ListNode,
         "__name__": "quest_user_submission",
         "__builtins__": {
             "__build_class__": __build_class__,
@@ -265,7 +335,12 @@ def resolve_entrypoint(namespace: Dict[str, Any], entrypoint: str) -> Callable[.
 def wrap_inputs(inputs: Dict[str, Any], recorder: Recorder) -> Dict[str, Any]:
     wrapped: Dict[str, Any] = {}
     for name, value in inputs.items():
-        if isinstance(value, list):
+        if name == "pos":
+            continue
+        if name in {"head", "list1", "list2"} and isinstance(value, list):
+            cycle_pos = inputs.get("pos") if name == "head" and isinstance(inputs.get("pos"), int) else None
+            wrapped[name] = list_to_nodes(value, recorder, name, cycle_pos)
+        elif isinstance(value, list):
             wrapped[name] = CountingList(value, recorder, name)
         else:
             wrapped[name] = copy.deepcopy(value)
@@ -274,6 +349,14 @@ def wrap_inputs(inputs: Dict[str, Any], recorder: Recorder) -> Dict[str, Any]:
 
 def replay_input_from_test(test: Dict[str, Any]) -> Dict[str, Any]:
     inputs = test.get("input", {})
+    if "head" in inputs or "list1" in inputs or "list2" in inputs:
+        values = inputs.get("head", inputs.get("list1", []))
+        return {
+            "structure": "linked_list",
+            "values": make_jsonable(values),
+            "target": make_jsonable(inputs.get("pos")),
+            "expectedIndex": make_jsonable(test.get("expected")),
+        }
     values = inputs.get("nums", [])
     return {
         "structure": "array",
@@ -316,7 +399,8 @@ def run_one_case(
                     sys.settrace(None)
 
         actual = guarded_call(invoke, timeout_ms)
-        if actual != expected:
+        actual_json = make_jsonable(actual)
+        if actual_json != expected:
             status = "wrong_answer"
         elif budget_limit is not None and recorder.read_count > budget_limit:
             status = "over_budget"

@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import samplePack from "../content/packs/timequake-search-rotated-array.json";
+import reversePack from "../content/packs/reverse-linked-list.json";
+import mergePack from "../content/packs/merge-two-sorted-lists.json";
+import cyclePack from "../content/packs/linked-list-cycle.json";
+import plainBinaryPack from "../content/packs/plain-binary-search.json";
 
 type Status =
   | "passed"
@@ -38,7 +42,7 @@ type ReplayCase = {
   error?: { kind: Status; message: string; line?: number } | null;
   budget: { enabled: boolean; limit?: number; used: number; unit: string; exceeded: boolean };
   summary: { durationMs: number; eventCount: number; truncated: boolean; memoryKb?: number };
-  input: { structure: "array"; values: number[]; target: number; expectedIndex: number };
+  input: { structure: "array" | "linked_list"; values: number[]; target?: number; expectedIndex: unknown };
   events: TimelineEvent[];
 };
 
@@ -55,12 +59,29 @@ type RunResult = {
   limits: { maxEvents: number; maxDurationMs: number; maxReads?: number };
 };
 
-type Challenge = typeof samplePack.quests[number] | typeof samplePack.boss;
+type PackChallenge = {
+  id: string;
+  order?: number;
+  title: string;
+  brief: string;
+  starterCode: string;
+  solution: { code: string };
+  unlock: { requiresQuestIds: string[]; requiresPassed: boolean };
+  packSlug: string;
+  packTitle: string;
+  packSceneType: "array" | "linked_list";
+};
+type Challenge = PackChallenge;
 type Attempt = { id: string; at: string; challengeId: string; status: Status; passed: boolean; replayCaseId?: string; eventCount: number; timelinePointer: string; solutionAssisted: boolean };
 type ProgressState = { cleared: Record<string, boolean>; solutionOpened: Record<string, boolean>; attempts: Record<string, Attempt[]>; savedCode: Record<string, string> };
 
-const PACK_SLUG = samplePack.slug;
-const CHALLENGES: Challenge[] = [...samplePack.quests, samplePack.boss];
+const PACKS = [samplePack, reversePack, mergePack, cyclePack, plainBinaryPack] as const;
+const CHALLENGES: Challenge[] = PACKS.flatMap((pack) => [...pack.quests, pack.boss].map((challenge) => ({
+  ...challenge,
+  packSlug: pack.slug,
+  packTitle: pack.title,
+  packSceneType: pack.scene.type as "array" | "linked_list"
+})));
 const STARTER_CODE = samplePack.boss.starterCode;
 const PASSING_CODE = samplePack.boss.solution.code;
 const TABS = "    ";
@@ -85,7 +106,7 @@ export default function Home() {
   const [userName, setUserName] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState>(EMPTY_PROGRESS);
   const [activeId, setActiveId] = useState(samplePack.quests[0]?.id ?? samplePack.boss.id);
-  const activeChallenge = useMemo(() => CHALLENGES.find((challenge) => challenge.id === activeId) ?? samplePack.boss, [activeId]);
+  const activeChallenge = useMemo(() => CHALLENGES.find((challenge) => challenge.id === activeId) ?? CHALLENGES[0], [activeId]);
   const [code, setCode] = useState(activeChallenge.starterCode);
   const [result, setResult] = useState<RunResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -101,7 +122,7 @@ export default function Home() {
   const activeLine = activeEvent?.line;
   const activeReadIndex = activeEvent?.kind === "read" ? activeEvent.ref?.index : undefined;
   const latestVars = useMemo(() => collectVars(events, cursor), [events, cursor]);
-  const sceneMode = (replay?.input.values.length ?? 0) > 24 ? "skyline" : "doors";
+  const sceneMode = replay?.input.structure === "linked_list" ? "portals" : (replay?.input.values.length ?? 0) > 24 ? "skyline" : "doors";
   const activeAttempts = progress.attempts[activeChallenge.id] ?? [];
   const bossUnlocked = samplePack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]);
   const isActiveLocked = !isUnlocked(activeChallenge, progress);
@@ -149,7 +170,7 @@ export default function Home() {
       const response = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: code, packSlug: PACK_SLUG, challengeId: activeChallenge.id })
+        body: JSON.stringify({ source: code, packSlug: activeChallenge.packSlug, challengeId: activeChallenge.id })
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Runner request failed");
@@ -262,6 +283,7 @@ export default function Home() {
             <Metric label="Events" value={`${events.length}/${result?.limits.maxEvents ?? 3000}`} />
             <Metric label="Mode" value={sceneMode} />
             <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
+            <Metric label="Library" value={`${PACKS.length} packs / ${CHALLENGES.length} challenges`} />
           </div>
         </header>
 
@@ -302,7 +324,7 @@ export default function Home() {
               <PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} />
             </div>
 
-            <ArrayScene replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} />
+            <SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} />
 
             <div className="grid gap-4 lg:grid-cols-2">
               <CodeTrace code={code} activeLine={activeLine} />
@@ -322,6 +344,16 @@ function LibraryPanel({ progress, activeId, onSelect }: { progress: ProgressStat
 function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><p className="text-[0.65rem] uppercase tracking-[0.2em] text-slate-500">{label}</p><p className="mt-1 truncate font-bold text-cyan-100">{value}</p></div>; }
 function OutcomeBadge({ status, passed }: { status: Status; passed: boolean }) { const copy = OUTCOME_COPY[status]; return <div className={`rounded-2xl border px-4 py-3 ${copy.tone}`}><p className="text-sm font-bold">{passed ? "Victory replay ready" : copy.title}</p><p className="text-xs opacity-80">Visual: {copy.visual}</p></div>; }
 function PlaybackControls(props: { cursor: number; total: number; playing: boolean; speed: number; onBack: () => void; onStep: () => void; onSkipStart: () => void; onSkipEnd: () => void; onToggle: () => void; onSpeed: () => void }) { return <div className="flex flex-wrap items-center gap-2 text-sm"><button className="control" onClick={props.onSkipStart}>⏮</button><button className="control" onClick={props.onBack}>Back</button><button className="control bg-cyan-300 text-slate-950" onClick={props.onToggle}>{props.playing ? "Pause" : "Play"}</button><button className="control" onClick={props.onStep}>Step</button><button className="control" onClick={props.onSkipEnd}>⏭</button><button className="control" onClick={props.onSpeed}>{props.speed}×</button><span className="min-w-24 text-slate-400">{props.total ? props.cursor + 1 : 0}/{props.total}</span></div>; }
+
+function SceneRenderer(props: { replay: ReplayCase | null; activeReadIndex?: number; vars: Record<string, unknown>; mode: string }) {
+  if (props.replay?.input.structure === "linked_list") return <LinkedListScene replay={props.replay} vars={props.vars} />;
+  return <ArrayScene {...props} />;
+}
+
+function LinkedListScene({ replay, vars }: { replay: ReplayCase | null; vars: Record<string, unknown> }) {
+  const values = replay?.input.values ?? [];
+  return <div className="rounded-3xl border border-purple-300/20 bg-gradient-to-b from-slate-900 to-slate-950 p-4"><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Linked-list portal/island scene</h2><p className="text-sm text-slate-400">pointer movement / relinking visible</p></div><div className="flex flex-wrap items-center gap-3">{values.map((value, index) => <div key={`${index}-${value}`} className="flex items-center gap-3"><div className="relative rounded-full border border-purple-200/50 bg-purple-300/15 px-4 py-3 text-center shadow-lg shadow-purple-950/40"><span className="block text-[0.65rem] text-purple-200">island {index}</span><b>{value}</b>{Object.values(vars).includes(index) ? <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded bg-yellow-300 px-1 text-[0.6rem] font-bold text-slate-950">ptr</span> : null}</div>{index < values.length - 1 ? <span className="text-purple-200">⟶ portal</span> : null}</div>)}</div><p className="mt-3 text-xs text-slate-400">Replay reads `.val` and `.next` through ListNode proxies so portal checks are counted and shown in the event stream.</p></div>;
+}
 
 function ArrayScene({ replay, activeReadIndex, vars, mode }: { replay: ReplayCase | null; activeReadIndex?: number; vars: Record<string, unknown>; mode: string }) {
   const values = replay?.input.values ?? []; const target = replay?.input.target; const expected = replay?.input.expectedIndex; const large = mode === "skyline"; const shown = large ? values.slice(0, 80) : values;

@@ -1,0 +1,339 @@
+{
+  "schemaVersion": "quest-pack.v0",
+  "id": "reverse-linked-list",
+  "slug": "reverse-linked-list",
+  "title": "Reverse Linked List: Portal Chain Reversal",
+  "status": "validated",
+  "metadata": {
+    "difficulty": "easy",
+    "originalTextConfirmed": true,
+    "authors": [
+      "Eric Weng",
+      "Hermes"
+    ],
+    "createdAt": "2026-10-01T00:00:00.000Z",
+    "updatedAt": "2026-10-01T00:00:00.000Z",
+    "displayName": "Reverse Linked List",
+    "shortDescription": "Reverse a chain of portal islands by rewiring next pointers.",
+    "sourceInspiredBy": "Reverse Linked List: Portal Chain Reversal"
+  },
+  "story": {
+    "worldName": "Portal Islands",
+    "premise": "Each node is an island connected by one-way portals.",
+    "playerRole": "Portal mapper",
+    "dataMetaphor": "islands",
+    "targetMetaphor": "target island",
+    "readMetaphor": "portal check",
+    "victoryText": "The island chain stabilizes.",
+    "failureText": "The portals point somewhere unexpected. Replay the walk."
+  },
+  "concepts": [
+    "linked_list"
+  ],
+  "runtime": {
+    "language": "python",
+    "signature": "class Solution:\n    def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:",
+    "entrypoint": "Solution().reverseList",
+    "importsAllowed": [],
+    "timeLimitMs": 2000,
+    "timelineEventCap": 3000
+  },
+  "scene": {
+    "type": "linked_list",
+    "renderer": "linked-list-portals-v0",
+    "smallInputMode": "islands",
+    "largeInputMode": "portal-chain",
+    "visualTokens": {
+      "node": "island",
+      "next": "portal",
+      "read": "map-check"
+    },
+    "trackedVariables": [
+      "head",
+      "prev",
+      "curr",
+      "next",
+      "slow",
+      "fast",
+      "list1",
+      "list2"
+    ],
+    "outcomeVisuals": {
+      "passed": "portal_chain_glow",
+      "wrong_answer": "red_chain_green_expected",
+      "compile_error": "broken_scroll",
+      "runtime_error": "portal_sparks",
+      "over_budget": "frayed_map_meter",
+      "loop_guard": "endless_portal_spin",
+      "off_end_read": "void_portal_fall"
+    }
+  },
+  "quests": [
+    {
+      "id": "save-next",
+      "order": 1,
+      "title": "Quest 1: Save the next portal",
+      "brief": "Return the values seen while walking the chain.",
+      "learningGoal": "Practice linked-list pointer movement.",
+      "signature": "def walk_values(head: Optional[ListNode]) -> List[int]:",
+      "entrypoint": "walk_values",
+      "starterCode": "def walk_values(head: Optional[ListNode]) -> List[int]:\n    pass\n",
+      "hints": [
+        {
+          "id": "h1",
+          "text": "Which pointer changes first?",
+          "cost": "free"
+        },
+        {
+          "id": "h2",
+          "text": "What should be saved before rewiring next?",
+          "cost": "reduces_reward"
+        }
+      ],
+      "solution": {
+        "code": "def walk_values(head: Optional[ListNode]) -> List[int]:\n    values = []\n    curr = head\n    while curr:\n        values.append(curr.val)\n        curr = curr.next\n    return values\n",
+        "explanation": "Walk the portal chain while keeping pointer state explicit.",
+        "complexity": {
+          "time": "O(n)",
+          "space": "O(1)"
+        }
+      },
+      "tests": {
+        "fixed": [
+          {
+            "id": "walk-basic",
+            "name": "walk",
+            "input": {
+              "head": [
+                1,
+                2,
+                3
+              ]
+            },
+            "expected": [
+              1,
+              2,
+              3
+            ]
+          }
+        ],
+        "replayCaseIds": [
+          "walk-basic"
+        ]
+      },
+      "budget": {
+        "enabled": false,
+        "unit": "node_read",
+        "failureMode": "badge_only"
+      },
+      "unlock": {
+        "requiresQuestIds": [],
+        "requiresPassed": true
+      },
+      "rewards": {
+        "xp": 20
+      }
+    },
+    {
+      "id": "rewire-one",
+      "order": 2,
+      "title": "Quest 2: Rewire one portal",
+      "brief": "Reverse a two-node chain.",
+      "learningGoal": "Practice linked-list pointer movement.",
+      "signature": "def reverse_two(head: Optional[ListNode]) -> Optional[ListNode]:",
+      "entrypoint": "reverse_two",
+      "starterCode": "def reverse_two(head: Optional[ListNode]) -> Optional[ListNode]:\n    pass\n",
+      "hints": [
+        {
+          "id": "h1",
+          "text": "Which pointer changes first?",
+          "cost": "free"
+        },
+        {
+          "id": "h2",
+          "text": "What should be saved before rewiring next?",
+          "cost": "reduces_reward"
+        }
+      ],
+      "solution": {
+        "code": "def reverse_two(head: Optional[ListNode]) -> Optional[ListNode]:\n    second = head.next\n    second.next = head\n    head.next = None\n    return second\n",
+        "explanation": "Walk the portal chain while keeping pointer state explicit.",
+        "complexity": {
+          "time": "O(n)",
+          "space": "O(1)"
+        }
+      },
+      "tests": {
+        "fixed": [
+          {
+            "id": "two",
+            "name": "two",
+            "input": {
+              "head": [
+                1,
+                2
+              ]
+            },
+            "expected": [
+              2,
+              1
+            ]
+          }
+        ],
+        "replayCaseIds": [
+          "two"
+        ]
+      },
+      "budget": {
+        "enabled": false,
+        "unit": "node_read",
+        "failureMode": "badge_only"
+      },
+      "unlock": {
+        "requiresQuestIds": [
+          "save-next"
+        ],
+        "requiresPassed": true
+      },
+      "rewards": {
+        "xp": 20
+      }
+    }
+  ],
+  "boss": {
+    "id": "boss-reverse-linked-list",
+    "order": 1,
+    "title": "Boss: Reverse the Portal Chain",
+    "brief": "Reverse every portal so the chain points backward.",
+    "learningGoal": "Practice linked-list pointer movement.",
+    "signature": "class Solution:\n    def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:",
+    "entrypoint": "Solution().reverseList",
+    "starterCode": "class Solution:\n    def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:\n        pass\n",
+    "hints": [
+      {
+        "id": "h1",
+        "text": "Which pointer changes first?",
+        "cost": "free"
+      },
+      {
+        "id": "h2",
+        "text": "What should be saved before rewiring next?",
+        "cost": "reduces_reward"
+      }
+    ],
+    "solution": {
+      "code": "class Solution:\n    def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:\n        prev = None\n        curr = head\n        while curr:\n            next = curr.next\n            curr.next = prev\n            prev = curr\n            curr = next\n        return prev\n",
+      "explanation": "Walk the portal chain while keeping pointer state explicit.",
+      "complexity": {
+        "time": "O(n)",
+        "space": "O(1)"
+      }
+    },
+    "tests": {
+      "fixed": [
+        {
+          "id": "reverse-basic",
+          "name": "four islands",
+          "input": {
+            "head": [
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          "expected": [
+            4,
+            3,
+            2,
+            1
+          ]
+        },
+        {
+          "id": "reverse-single",
+          "name": "one island",
+          "input": {
+            "head": [
+              1
+            ]
+          },
+          "expected": [
+            1
+          ]
+        }
+      ],
+      "replayCaseIds": [
+        "reverse-basic"
+      ]
+    },
+    "budget": {
+      "enabled": false,
+      "unit": "node_read",
+      "failureMode": "badge_only"
+    },
+    "unlock": {
+      "requiresQuestIds": [
+        "save-next",
+        "rewire-one"
+      ],
+      "requiresPassed": true
+    },
+    "rewards": {
+      "xp": 20
+    }
+  },
+  "review": {
+    "enabled": true,
+    "defaultSchedule": [
+      1,
+      3,
+      7,
+      14,
+      30
+    ],
+    "variants": [],
+    "rules": {
+      "failedReviewIntervalDays": 1,
+      "solutionAssistedIntervalDays": 1,
+      "heavyHintMaxIntervalDays": 3,
+      "snoozeAllowed": true
+    }
+  },
+  "rewards": {
+    "xp": {
+      "questClear": 20,
+      "bossClear": 100,
+      "solutionAssistedMultiplier": 0.5
+    },
+    "currency": {
+      "name": "Shards",
+      "bossClear": 1,
+      "shopEnabled": false
+    }
+  },
+  "validation": {
+    "referenceMustPass": true,
+    "linearScanShouldFailBudget": false,
+    "requiredOutcomeFixtures": [
+      "passed",
+      "wrong_answer",
+      "compile_error",
+      "runtime_error",
+      "over_budget",
+      "loop_guard",
+      "off_end_read"
+    ],
+    "maxTimelineEvents": 3000,
+    "originalTextChecklist": {
+      "noCopiedProblemStatement": true,
+      "originalStory": true,
+      "noRealGameCharactersArtLogosMapsOrUi": true
+    },
+    "visualQualityChecklist": {
+      "lineMovementVisible": true,
+      "pointerMovementVisible": true,
+      "sceneMetaphorOriginal": true,
+      "outcomeVisualsDistinct": true
+    }
+  }
+}

@@ -199,6 +199,12 @@
       "noCopiedProblemStatement": true,
       "originalStory": true,
       "noRealGameCharactersArtLogosMapsOrUi": true
+    },
+    "visualQualityChecklist": {
+      "lineMovementVisible": true,
+      "pointerMovementVisible": false,
+      "sceneMetaphorOriginal": true,
+      "outcomeVisualsDistinct": true
     }
   }
 }

@@ -149,8 +149,8 @@ def validate_references(pack: dict[str, Any]) -> dict[str, str]:
         kinds = {event.get("kind") for event in replay.get("events", [])}
         if "line" not in kinds or "outcome" not in kinds:
             fail(f"scene smoke failed for {challenge['id']}: timeline lacks line/outcome events")
-        if pack["scene"]["type"] == "array" and "read" not in kinds:
-            fail(f"scene smoke failed for {challenge['id']}: array replay lacks reads")
+        if pack["scene"]["type"] in {"array", "linked_list"} and "read" not in kinds:
+            fail(f"scene smoke failed for {challenge['id']}: replay lacks reads")
     return statuses
 
 
