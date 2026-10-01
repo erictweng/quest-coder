@@ -1,8 +1,8 @@
 # Quest Coder UI/UX Flow and Visual System
 
-Direction: **Undertale-like, but happier** — a retro pixel RPG interface with warmth, humor, readable panels, bit characters, and a focused coding flow.
+Direction: **Undertale-like, but happier**, now specialized as **Sky-Island Academy** — a bright pixel-fantasy coding academy in the clouds with warmth, humor, readable panels, bit characters, and a focused coding flow.
 
-This document expands `docs/UI_UX_REDESIGN_BRIEF.md` into a concrete flow, aesthetic, and color scheme.
+This document expands `docs/UI_UX_REDESIGN_BRIEF.md` into a concrete flow, aesthetic, and color scheme. The detailed Sky-Island implementation layer lives in `docs/SKY_ISLAND_PIXEL_AESTHETIC.md`.
 
 ## Product feeling
 
@@ -15,6 +15,7 @@ The vibe is not grim dungeon crawler and not corporate coding platform. It is:
 - Friendly, slightly weird, character-driven.
 - Focused enough for serious coding.
 - Happier and brighter than Undertale while borrowing its simple pixel framing, character dialogue energy, and battle/encounter structure.
+- Visually grounded in **Sky-Island Academy**: floating islands, cloud paths, warm wood signs, lantern quest nodes, and sky gates for bosses.
 
 ## Core metaphor
 

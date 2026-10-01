@@ -106,7 +106,9 @@ The product should feel like a retro pixel RPG layered over a focused coding int
 
 ### Art direction
 
-Design target: **Undertale-like, but happier**.
+Design target: **Undertale-like, but happier**, now specialized as **Sky-Island Academy**.
+
+Sky-Island Academy means Quest Coder should feel like a bright pixel-fantasy coding academy in the clouds: floating campaign islands, wood-sign cards, cloud paths, lantern quest nodes, and sky-gate bosses. This is an original adaptation of the reference mood; do not copy its assets, characters, buildings, or exact compositions.
 
 - **Style:** retro, pixel-art, bit-character, game-console UI.
 - **Mood:** playful RPG quest terminal, cozy and encouraging instead of ominous.

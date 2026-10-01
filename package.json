@@ -22,7 +22,8 @@
     "smoke:sprint12": "node scripts/sprint12-smoke.mjs",
     "smoke:sprint13": "node scripts/sprint13-smoke.mjs",
     "smoke:sprint14": "node scripts/sprint14-smoke.mjs",
-    "smoke:sprint15": "node scripts/sprint15-smoke.mjs"
+    "smoke:sprint15": "node scripts/sprint15-smoke.mjs",
+    "smoke:sky-island": "node scripts/sky-island-aesthetic-smoke.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "latest",
