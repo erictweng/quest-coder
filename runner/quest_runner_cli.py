@@ -6,15 +6,14 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKS_ROOT = ROOT / "runner" / "packs"
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
+from runner.private_pack import ALLOWED_PACK_SLUG, load_private_pack
 from runner.quest_runner import default_rotated_budget, run_submission
 
 ALLOWED_FIELDS = {"source", "packSlug", "challengeId", "mode"}
-ALLOWED_PACKS = {"forest-of-patience-climbing-stairs"}
 ALLOWED_MODES = {"run", "submit"}
-
 
 # Whole-submission deadline. Must stay below the gateway's worker timeout so a
 # non-terminating submission comes back classified instead of as a gateway 504.
@@ -32,24 +31,21 @@ def budget_limit(challenge: dict[str, Any], tests: list[dict[str, Any]]) -> int 
 
 
 def challenge_from_pack(pack: dict[str, Any], challenge_id: str) -> dict[str, Any]:
-    for challenge in [*pack.get("quests", []), pack.get("boss")]:
-        if isinstance(challenge, dict) and challenge.get("id") == challenge_id:
+    for challenge in pack["challenges"]:
+        if challenge["id"] == challenge_id:
             return challenge
     raise ValueError("unknown challenge")
 
 
 def load_pack_challenge(pack_slug: str, challenge_id: str, mode: str) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
-    if pack_slug not in ALLOWED_PACKS:
+    if pack_slug != ALLOWED_PACK_SLUG:
         raise ValueError("unknown pack")
-    pack = json.loads((PACKS_ROOT / f"{pack_slug}.json").read_text())
+    pack = load_private_pack()
     challenge = challenge_from_pack(pack, challenge_id)
-    test_spec = challenge.get("tests", {})
-    tests = list(test_spec.get(mode) or [])
-    if not tests:
-        raise ValueError(f"challenge has no {mode} tests")
-    replay_case_id = test_spec.get("replayCaseId")
-    all_tests = list(test_spec.get("submit") or tests)
-    replay_test = next((test for test in all_tests if test.get("id") == replay_case_id), None)
+    test_spec = challenge["tests"]
+    tests = list(test_spec[mode])
+    replay_case_id = test_spec["replayCaseId"]
+    replay_test = next((test for test in test_spec["submit"] if test["id"] == replay_case_id), None)
     return pack, challenge, tests, replay_test
 
 
@@ -65,10 +61,14 @@ def parse_payload(payload: Any) -> tuple[str, str, str, str]:
     pack_slug = payload["packSlug"]
     challenge_id = payload["challengeId"]
     mode = payload["mode"]
-    if not isinstance(source, str) or not source.strip(): raise ValueError("source must be a non-empty string")
-    if pack_slug not in ALLOWED_PACKS: raise ValueError("unknown pack")
-    if not isinstance(challenge_id, str): raise ValueError("unknown challenge")
-    if mode not in ALLOWED_MODES: raise ValueError("mode must be run or submit")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("source must be a non-empty string")
+    if pack_slug != ALLOWED_PACK_SLUG:
+        raise ValueError("unknown pack")
+    if not isinstance(challenge_id, str):
+        raise ValueError("unknown challenge")
+    if mode not in ALLOWED_MODES:
+        raise ValueError("mode must be run or submit")
     return source, pack_slug, challenge_id, mode
 
 
@@ -82,8 +82,8 @@ def main() -> int:
             quest_id=challenge["id"],
             entrypoint=challenge["entrypoint"],
             budget_limit=budget_limit(challenge, tests),
-            timeout_ms=int(pack.get("runtime", {}).get("timeLimitMs", 2000)),
-            max_events=int(pack.get("runtime", {}).get("timelineEventCap", 3000)),
+            timeout_ms=int(pack["runtime"]["timeLimitMs"]),
+            max_events=int(pack["runtime"]["timelineEventCap"]),
             mode=mode,
             replay_test=replay_test,
             isolate=True,

@@ -6,6 +6,7 @@ import { createRateLimiter } from "../../../lib/rate-limit";
 import { clientAddress } from "../../../lib/client-address";
 import { currentSession, SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from "../../../lib/session";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import { JsonRequestError, readCappedJson } from "../../../lib/read-json-request";
 
 const HOUR_MS = 60 * 60_000;
 const newSessionsPerAddress = createRateLimiter({ limit: 30, windowMs: HOUR_MS });
@@ -23,8 +24,14 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (configuredProgressBackend() === "supabase") return requestMagicLink(request);
-  return createLocalSession(request);
+  try {
+    const body = await readCappedJson(request, 4_096) as { email?: unknown; displayName?: unknown };
+    if (configuredProgressBackend() === "supabase") return requestMagicLink(request, body);
+    return createLocalSession(request, body);
+  } catch (error) {
+    if (error instanceof JsonRequestError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    throw error;
+  }
 }
 
 export async function DELETE() {
@@ -39,8 +46,7 @@ export async function DELETE() {
   return NextResponse.json({ authenticated: false });
 }
 
-async function requestMagicLink(request: Request) {
-  const body = await request.json().catch(() => ({})) as { email?: unknown };
+async function requestMagicLink(request: Request, body: { email?: unknown }) {
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase().slice(0, 254) : "";
   if (!/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ error: "a valid email is required" }, { status: 400 });
 
@@ -55,8 +61,7 @@ async function requestMagicLink(request: Request) {
   return NextResponse.json({ pending: true, message: "Check your email for a secure sign-in link." });
 }
 
-async function createLocalSession(request: Request) {
-  const body = await request.json().catch(() => ({})) as { displayName?: unknown };
+async function createLocalSession(request: Request, body: { displayName?: unknown }) {
   const displayName = typeof body.displayName === "string" ? body.displayName.trim().slice(0, 40) : "";
   if (!displayName) return NextResponse.json({ error: "display name is required" }, { status: 400 });
 

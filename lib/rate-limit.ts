@@ -48,10 +48,11 @@ export function createUsageLimiter(options: { budget: number; windowMs: number; 
   const { budget, windowMs, maxConcurrent, maxKeys = 10_000 } = options;
   const usage = new Map<string, { startedAt: number; spent: number; inFlight: number }>();
 
-  function current(key: string, now: number) {
+  function current(key: string, now: number, create: boolean) {
     let entry = usage.get(key);
     if (!entry) {
-      if (usage.size >= maxKeys) evictIdle(now);
+      if (!create) return null;
+      if (usage.size >= maxKeys && !evictIdle(now)) return null;
       entry = { startedAt: now, spent: 0, inFlight: 0 };
       usage.set(key, entry);
     } else if (now - entry.startedAt >= windowMs) {
@@ -65,12 +66,24 @@ export function createUsageLimiter(options: { budget: number; windowMs: number; 
     for (const [key, entry] of usage) {
       if (entry.inFlight === 0 && now - entry.startedAt >= windowMs) usage.delete(key);
     }
+    if (usage.size < maxKeys) return true;
+    // Reuse the oldest idle slot even if its accounting window is still live.
+    // In-flight entries are never evicted because their matching end() must be
+    // able to release and charge the same entry.
+    for (const [key, entry] of usage) {
+      if (entry.inFlight === 0) {
+        usage.delete(key);
+        return true;
+      }
+    }
+    return false;
   }
 
   return {
     /** Reserves a slot for one operation, or says why not. Every allowed `begin` must be paired with `end`. */
-    begin(key: string, now = Date.now()): RateLimitResult & { reason?: "busy" | "budget" } {
-      const entry = current(key, now);
+    begin(key: string, now = Date.now()): RateLimitResult & { reason?: "busy" | "budget" | "capacity" } {
+      const entry = current(key, now, true);
+      if (!entry) return { allowed: false, retryAfterSeconds: 1, reason: "capacity" };
       if (entry.inFlight >= maxConcurrent) return { allowed: false, retryAfterSeconds: 1, reason: "busy" };
       if (entry.spent >= budget) {
         return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((entry.startedAt + windowMs - now) / 1000)), reason: "budget" };
@@ -80,7 +93,8 @@ export function createUsageLimiter(options: { budget: number; windowMs: number; 
     },
     /** Releases the slot and charges what the operation cost. */
     end(key: string, cost: number, now = Date.now()) {
-      const entry = current(key, now);
+      const entry = current(key, now, false);
+      if (!entry) return;
       entry.inFlight = Math.max(0, entry.inFlight - 1);
       entry.spent += Math.max(0, cost);
     }

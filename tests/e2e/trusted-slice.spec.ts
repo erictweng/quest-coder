@@ -1,7 +1,7 @@
 import { expect, request as playwrightRequest, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-const pack = JSON.parse(readFileSync("runner/packs/forest-of-patience-climbing-stairs.json", "utf8"));
+const pack = JSON.parse(readFileSync("content/server/forest-of-patience-climbing-stairs.json", "utf8"));
 const path = [...pack.quests, pack.boss];
 
 async function signIn(page: Page, name: string) {
@@ -213,11 +213,7 @@ test("runner boundary fails closed and hides submit fixtures", async ({ request 
   for (const challenge of path) {
     expect(publicPack).not.toContain(JSON.stringify(challenge.solution.code).slice(1, -1));
     expect(publicPack).not.toContain(challenge.hints[0].text);
-    // The replay case is a deliberately public fixture; its id is named in the pack.
-    const isPublic = (item: any) => item.id === challenge.tests.replayCaseId || challenge.tests.run.some((shown: any) => shown.id === item.id);
-    for (const hidden of challenge.tests.submit.filter((item: any) => !isPublic(item))) {
-      expect(publicPack).not.toContain(`"${hidden.id}"`);
-    }
+    expect(challenge.tests.submit).toBeUndefined();
   }
 
   const session = await request.post("/api/session", { data: { displayName: "Boundary Test" } });
@@ -264,4 +260,19 @@ test("runner boundary fails closed and hides submit fixtures", async ({ request 
   expect(repeated.ok()).toBeTruthy();
   expect((await repeated.json()).reward).toBeNull();
   expect((await (await request.get("/api/progress")).json()).progress.rewards.xp).toBe(13);
+});
+
+test("app JSON endpoints reject oversized bodies", async ({ request }) => {
+  const session = await request.post("/api/session", { data: { displayName: "Size Boundary" } });
+  expect(session.ok()).toBeTruthy();
+  const oversizedRun = await request.post("/api/run", {
+    headers: { "content-type": "application/json" },
+    data: JSON.stringify({ source: "x".repeat(30_000), packSlug: pack.slug, challengeId: path[0].id, mode: "run" })
+  });
+  expect(oversizedRun.status()).toBe(413);
+  const oversizedProgress = await request.put("/api/progress", {
+    headers: { "content-type": "application/json" },
+    data: JSON.stringify({ progress: { savedCode: { huge: "x".repeat(1_000_100) } } })
+  });
+  expect(oversizedProgress.status()).toBe(413);
 });

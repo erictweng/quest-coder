@@ -50,3 +50,13 @@ test("cheap operations barely touch the budget", () => {
     usage.end("a", 300, i * 400 + 300);
   }
 });
+
+test("usage limiter never exceeds maxKeys when every tracked key is live", () => {
+  const usage = createUsageLimiter({ budget: 10_000, windowMs: 60_000, maxConcurrent: 1, maxKeys: 2 });
+  assert.equal(usage.begin("a", 0).allowed, true);
+  assert.equal(usage.begin("b", 0).allowed, true);
+  assert.deepEqual(usage.begin("c", 0), { allowed: false, retryAfterSeconds: 1, reason: "capacity" });
+  usage.end("a", 100, 100);
+  assert.equal(usage.begin("c", 101).allowed, true);
+  assert.deepEqual(usage.begin("a", 102), { allowed: false, retryAfterSeconds: 1, reason: "capacity" });
+});

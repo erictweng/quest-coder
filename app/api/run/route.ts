@@ -5,6 +5,7 @@ import { createRateLimiter, createUsageLimiter } from "../../../lib/rate-limit";
 import { parseRunRequest, RunValidationError } from "../../../lib/run-contract";
 import { RunnerBoundaryError, submitToRunner } from "../../../lib/runner-client";
 import { currentSession } from "../../../lib/session";
+import { JsonRequestError, readCappedJson } from "../../../lib/read-json-request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ const runLimit = createRateLimiter({ limit: 30, windowMs: 60_000 });
 // The runner has few slots, so a session gets one at a time and a bounded share of runner time.
 // Slow (for example non-terminating) submissions use the share up quickly; normal ones barely touch it.
 const runnerTime = createUsageLimiter({ budget: 20_000, windowMs: 60_000, maxConcurrent: 1 });
+const MAX_RUN_BODY_BYTES = 25_024;
 
 export async function POST(request: Request) {
   try {
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
     if (!limit.allowed) {
       return NextResponse.json({ error: `Too many runs. Try again in ${limit.retryAfterSeconds}s.`, code: "rate_limited" }, { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } });
     }
-    const payload = parseRunRequest(await request.json().catch(() => null));
+    const payload = parseRunRequest(await readCappedJson(request, MAX_RUN_BODY_BYTES));
     const pack = loadQuestPack(payload.packSlug);
     const challenge = findChallenge(pack, payload.challengeId);
     const required = challenge.unlock?.requiresQuestIds ?? [];
@@ -67,6 +69,7 @@ export async function POST(request: Request) {
       security: { profile: "isolated-runner-service-v1", grading: "authoritative-execution", fallback: "disabled" }
     });
   } catch (error) {
+    if (error instanceof JsonRequestError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     if (error instanceof RunValidationError) return NextResponse.json({ error: error.message, code: "invalid_request" }, { status: 400 });
     if (error instanceof RunnerBoundaryError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     return NextResponse.json({ error: "Unable to process this run.", code: "internal_error" }, { status: 500 });

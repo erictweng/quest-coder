@@ -11,6 +11,7 @@ tsconfig.tsbuildinfo
 # Local runtime and agent state
 .data/
 .hsub/
+.private/
 
 # Generated test output
 coverage/

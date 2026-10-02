@@ -28,7 +28,7 @@ Browser
         -> CPython grading engine
 ```
 
-There is no grading fallback. The browser imports `content/public/`; the runner owns `runner/packs/`.
+There is no grading fallback. The browser imports `content/public/`; the runner owns a validated private pack mounted through `QUEST_CODER_PRIVATE_PACK_PATH`.
 
 ## Persistence contract
 

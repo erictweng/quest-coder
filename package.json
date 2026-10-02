@@ -13,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "build:packs": "python3 scripts/build_pack_projections.py",
     "test:packs": "python3 scripts/build_pack_projections.py --check",
+    "private-pack:generate": "python3 scripts/private_pack.py generate",
+    "private-pack:validate": "python3 scripts/private_pack.py validate",
     "test:unit": "node --test 'tests/unit/*.test.ts'",
     "test:runner": "python3 -m unittest discover -s runner/tests -p 'test_*.py' -v",
     "runner:service": "python3 runner/service/app.py",

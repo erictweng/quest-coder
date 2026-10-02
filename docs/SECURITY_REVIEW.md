@@ -8,10 +8,10 @@
 - Hints and solutions can only be opened for quests the player has unlocked.
 - Runner output is strict JSON: non-finite and oversized numbers are returned as text and grade as wrong answers.
 - Only the active pack and four challenge IDs are accepted. Unknown fields, modes, packs, challenge IDs, and traversal strings are rejected.
-- The runner service requires a bearer token (compared in constant time) and caps request, execution time, stdout, and response size.
-- The CLI resolves packs from fixed `runner/packs/` storage; callers cannot provide paths, tests, entrypoints, commands, or image names.
+- The runner service requires a bearer token (compared in constant time). Request bodies, worker stdout/stderr, CLI stdout/stderr, and app-side runner responses are streamed under byte caps; children/streams are cancelled as soon as a cap is crossed.
+- The CLI loads only the server-controlled absolute path in `QUEST_CODER_PRIVATE_PACK_PATH`; callers cannot provide paths, tests, entrypoints, commands, or image names. Missing or invalid packs fail closed at service startup and CLI invocation.
 - Grading is separated from execution. Each case runs in a throwaway worker process that receives only the source and the case inputs; the grader process holds the expected values and decides the verdict.
-- Hidden submit fixtures exist only in `runner/packs/`. They are excluded from both Next.js projections, client imports, and the pack API. Submit responses redact inputs, expected values, actual values, private case IDs, and error text (which is produced by submitted code).
+- Authoritative Submit fixtures exist only in a mounted private JSON file outside git and the image. Submit responses redact inputs, expected values, actual values, private case IDs, and error text (which is produced by submitted code).
 - Solutions and hint text are not shipped to the browser. The server releases them on request and records that it did, so the assisted-clear reward penalty cannot be skipped by the client.
 - Clears, rewards, and review schedules are written only by the server after a passing submit. The progress `PUT` accepts drafts and attempt history only.
 - Anonymous sessions use opaque 256-bit tokens in HttpOnly, SameSite=Lax cookies; only token hashes are stored. Logging out does not delete the save.
@@ -21,6 +21,8 @@
 The Python engine rejects imports, file APIs, dynamic execution, dunder access, and common network/process names. Each worker has a wall-clock guard, a hard kill, and best-effort CPU/address-space limits, and a whole submission has a 5.5 s deadline below the gateway's 7 s and the app's 8 s timeouts. These checks reduce exposure but are not a substitute for OS isolation.
 
 ## Known limits
+
+- The old authoritative fixtures were present in git history. Production must use newly rotated/replaced cases; moving the old values into a secret does not make them secret again.
 
 - Workers share a filesystem and user with the grader, so pack files are readable by any code that defeats the source checks. Only OS-level isolation closes this.
 - The rate limiters live in process memory, so they are per app instance. Someone creating many sessions can still multiply the per-session runner share, and without a trusted proxy a caller who also writes drafts into each session can grow the database. Put a rate-limiting proxy in front of a public deployment.
@@ -46,7 +48,7 @@ The local Python service is for development and private verification. It is not 
 Automated tests prove:
 
 - `return 999` fails through real execution;
-- reference solutions pass server-owned submit suites;
+- reference solutions pass the explicitly injected non-production fixture;
 - traversal and unknown fields are rejected;
 - submit details are redacted;
 - the browser receives no `tests.submit` projection;
@@ -56,6 +58,7 @@ Automated tests prove:
 - client-supplied clears, rewards, and help claims are ignored or rejected;
 - an unavailable/misconfigured runner fails closed;
 - progress is isolated behind an HttpOnly anonymous session.
+- missing/invalid private packs fail closed, streamed request/response caps cancel early, usage-limiter key storage remains bounded, and the hardened container runs non-root with a read-only root and internal network.
 
 ## Remaining launch conditions
 

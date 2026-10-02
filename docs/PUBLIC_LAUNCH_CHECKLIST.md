@@ -19,6 +19,7 @@
 ## Required before unrestricted public traffic
 
 - [ ] Deploy `runner/service/Dockerfile` on a dedicated hardened runner host.
+- [ ] Generate and mount a newly rotated private pack; never reuse the grading fixtures exposed in git history.
 - [ ] Verify outbound network denial and read-only filesystem at the host/container layer.
 - [ ] Verify CPU, memory, PID, output, and wall-time enforcement under abuse.
 - [ ] Put runner traffic behind TLS, app allowlisting, and a rotated server-only token.

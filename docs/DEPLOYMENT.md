@@ -14,7 +14,9 @@ The Next.js process never executes Python and never fabricates grading results. 
 ```bash
 npm ci
 cp .env.example .env.local
-QUEST_CODER_RUNNER_TOKEN=<same-local-token> npm run runner:service
+QUEST_CODER_RUNNER_TOKEN=<same-local-token> \
+QUEST_CODER_PRIVATE_PACK_PATH=$PWD/runner/tests/fixtures/non-production-private-pack.json \
+npm run runner:service
 npm run dev
 ```
 
@@ -45,7 +47,18 @@ Use `npm ci`, not `npm install`, for reproducible deployment from the lockfile.
 
 ## Runner deployment
 
-Build from `runner/service/Dockerfile`. `compose.yaml` demonstrates a read-only container, non-root user, dropped capabilities, no-new-privileges, PID/memory/CPU limits, a bounded tmpfs, and an internal network with no route out. Because that network is internal, the runner has no published host port: the app must join `runner_net` and use `http://runner:8787`. The compose file has not been exercised in CI.
+Build from `runner/service/Dockerfile`. Its Python base is pinned by registry digest and explicit `COPY` paths omit `runner/tests/fixtures`. `compose.yaml` demonstrates a read-only container, non-root user, dropped capabilities, no-new-privileges, PID/memory/CPU limits, a bounded tmpfs, an internal network, and a read-only secret mount. CI builds and starts this image and verifies those boundaries.
+
+`QUEST_CODER_PRIVATE_PACK_PATH` is mandatory. For Compose, set `QUEST_CODER_PRIVATE_PACK_FILE` to a host-side rotated pack; Compose mounts it at `/run/secrets/quest_coder_private_pack`. The runner exits before listening if the file is absent or invalid.
+
+The historical git repository exposed the previous grading pack. **Do not reuse it in production.** Generate a case-free skeleton under ignored storage, add newly rotated private cases out of band, and validate it:
+
+```bash
+npm run private-pack:generate -- .private/runner-packs/forest-of-patience-climbing-stairs.json
+npm run private-pack:validate -- .private/runner-packs/forest-of-patience-climbing-stairs.json
+```
+
+See `docs/PRIVATE_RUNNER_PACK.md` for the complete schema and replay/public-case rule.
 
 Before public traffic, the runner host must additionally enforce:
 

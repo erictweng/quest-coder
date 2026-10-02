@@ -26,6 +26,8 @@ jobs:
       - run: npm run test:packs
       - run: npm run test:unit
       - run: npm run test:runner
+      - name: Verify hardened runner container
+        run: scripts/ci_runner_container.sh
       - run: npx playwright install --with-deps chromium
       # Builds the app, then drives the production build in a browser.
       - run: npm run test:e2e

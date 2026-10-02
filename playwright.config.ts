@@ -8,7 +8,7 @@ export default defineConfig({
   use: { baseURL: "http://localhost:3170", trace: "retain-on-failure", screenshot: "only-on-failure" },
   webServer: [
     {
-      command: "QUEST_CODER_RUNNER_TOKEN=e2e-token QUEST_CODER_RUNNER_PORT=8788 python3 runner/service/app.py",
+      command: "QUEST_CODER_RUNNER_TOKEN=e2e-token QUEST_CODER_RUNNER_PORT=8788 QUEST_CODER_PRIVATE_PACK_PATH=$PWD/runner/tests/fixtures/non-production-private-pack.json python3 runner/service/app.py",
       url: "http://127.0.0.1:8788/healthz",
       reuseExistingServer: false,
       timeout: 30_000

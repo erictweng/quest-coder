@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readServerProgress, recordHintOpened, recordSolutionOpened, unlockShopPreview, writeClientProgress, type StoredProgress } from "../../../lib/progress-store";
 import { findChallengeById, revealedContent } from "../../../lib/quests";
 import { currentSession } from "../../../lib/session";
+import { JsonRequestError, readCappedJson } from "../../../lib/read-json-request";
 
 const MAX_BODY_BYTES = 1_000_000;
 
@@ -19,7 +20,9 @@ export async function GET() {
 export async function PUT(request: Request) {
   const session = await currentSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const body = await readJsonBody(request) as { progress?: unknown } | null;
+  let body: { progress?: unknown };
+  try { body = await readCappedJson(request, MAX_BODY_BYTES) as { progress?: unknown }; }
+  catch (error) { return jsonBodyError(error); }
   if (!body || typeof body.progress !== "object" || body.progress === null) return NextResponse.json({ error: "invalid progress" }, { status: 400 });
   try { return progressResponse(await writeClientProgress(session.progressKey, body.progress)); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "write failed" }, { status: 400 }); }
@@ -29,7 +32,9 @@ export async function PUT(request: Request) {
 export async function POST(request: Request) {
   const session = await currentSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const body = await readJsonBody(request) as { action?: unknown; challengeId?: unknown } | null;
+  let body: { action?: unknown; challengeId?: unknown };
+  try { body = await readCappedJson(request, MAX_BODY_BYTES) as { action?: unknown; challengeId?: unknown }; }
+  catch (error) { return jsonBodyError(error); }
   const found = typeof body?.challengeId === "string" ? findChallengeById(body.challengeId) : null;
   // Help is only available for quests the player has reached.
   const { cleared } = await readServerProgress(session.progressKey);
@@ -52,9 +57,7 @@ export async function POST(request: Request) {
   }
 }
 
-async function readJsonBody(request: Request): Promise<unknown> {
-  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return null;
-  const text = await request.text().catch(() => "");
-  if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) return null;
-  try { return JSON.parse(text); } catch { return null; }
+function jsonBodyError(error: unknown) {
+  if (error instanceof JsonRequestError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+  return NextResponse.json({ error: "invalid request", code: "invalid_request" }, { status: 400 });
 }
