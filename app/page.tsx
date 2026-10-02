@@ -470,9 +470,9 @@ export default function Home() {
           <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Questions list</h2><p className="text-sm text-slate-400">Select a question to open the focused solve screen.</p></div><div className="flex flex-wrap gap-2 text-xs">{(["All", "Available", "Cleared", "Review", "Boss"] as QuestionFilter[]).map((filter) => <button key={filter} className={questionFilter === filter ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setQuestionFilter(filter)}>{filter}</button>)}</div></div><div className="grid gap-3 md:grid-cols-2">{CHALLENGES.filter((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); if (questionFilter === "Available") return !locked && !cleared && !challenge.isBoss; if (questionFilter === "Cleared") return cleared; if (questionFilter === "Review") return reviewDue; if (questionFilter === "Boss") return challenge.isBoss; return true; }).map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = cleared ? "cleared" : reviewDue ? "review due" : locked ? "locked" : challenge.isBoss ? "boss" : "available"; return <button key={challenge.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:border-cyan-300" onClick={() => selectChallenge(challenge.id)}><b>{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</b><p className="mt-1 text-xs text-slate-400">{challenge.packTitle} · {(progress.attempts[challenge.id] ?? []).length} attempts</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={cleared ? "green" : reviewDue ? "purple" : locked ? "muted" : challenge.isBoss ? "pink" : "cyan"} />{challenge.packConcepts.slice(0, 2).map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></button>; })}</div></section>
         ) : (
           <section className="solve-split grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]" aria-label="Focused split-pane solve screen">
-            <span className="sr-only">Focused question pane Code compiler pane Code on the right Mini campaign categories and quest path</span>
-            <aside className="wood-sign-panel rounded-3xl p-5 shadow-xl shadow-cyan-950/20">
-              <div className="mb-3 flex justify-end"><img className="sky-asset sky-asset-soft h-8 w-16" src="/art/sky-island/cloud-tile.svg" alt="Original pixel cloud ornament" /></div>
+            <span className="sr-only">Focused question pane Code compiler pane Code on the right Mini campaign categories and quest path Cyberpunk solve encounter restrained editor-safe</span>
+            <aside className="terminal-card rounded-3xl p-5 shadow-xl shadow-cyan-950/20">
+              <div className="mb-3 flex justify-end"><span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.25em] text-cyan-100">Encounter frame</span></div>
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Encounter pane</p>
@@ -482,9 +482,9 @@ export default function Home() {
                 <button className="control" onClick={() => setSurface("campaignDetail")}>Map</button>
               </div>
 
-              <div className="mb-4 rounded-2xl border border-purple-300/20 bg-purple-300/5 p-3" aria-label="Mini cyberpunk maze categories and quest path">
+              <div className="neon-maze-panel mb-4 rounded-2xl p-3" aria-label="Mini cyberpunk maze categories and quest path">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="text-xs uppercase tracking-[0.25em] text-purple-200">{activePack.title}</p><span className="text-xs text-slate-400">Pellet route</span></div>
-                <div className="flex flex-wrap gap-2">{[...activePack.quests, activePack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isCurrent = challenge.id === activeChallenge.id; const isBoss = challenge.id === activePack.boss.id; return <button key={challenge.id} className={`quest-stepping-stone rounded-xl border px-3 py-2 text-xs font-bold ${isCurrent ? "border-cyan-200 bg-cyan-300 text-slate-950" : cleared ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : locked ? "border-slate-600 bg-slate-800/60 text-slate-400" : isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-100" : "border-white/10 bg-white/5 text-slate-200"}`} onClick={() => selectChallenge(challenge.id)}>{isBoss ? "Firewall" : `Q${challenge.order ?? "?"}`}</button>; })}</div>
+                <div className="flex flex-wrap gap-2">{[...activePack.quests, activePack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isCurrent = challenge.id === activeChallenge.id; const isBoss = challenge.id === activePack.boss.id; return <button key={challenge.id} className={`pellet-node rounded-xl border px-3 py-2 text-xs font-bold ${isCurrent ? "border-cyan-200 bg-cyan-300 text-slate-950" : cleared ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : locked ? "border-slate-600 bg-slate-800/60 text-slate-400" : isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-100" : "border-white/10 bg-white/5 text-slate-200"}`} onClick={() => selectChallenge(challenge.id)}>{isBoss ? "Firewall" : `Q${challenge.order ?? "?"}`}</button>; })}</div>
                 <p className="mt-3 text-xs text-slate-400">{activePack.concepts.join(" · ")}</p>
               </div>
 
@@ -496,8 +496,8 @@ export default function Home() {
 
               {solveTab === "Question" ? (
                 <div className="space-y-4">
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Problem statement</p>
+                  <div className="terminal-card rounded-2xl p-4">
+                    <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">Problem statement</p>
                     <p className="mt-3 text-base leading-7 text-slate-100">{activeChallenge.brief}</p>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -545,10 +545,10 @@ export default function Home() {
               )}
             </aside>
 
-            <section className="pixel-panel rounded-3xl p-5 shadow-xl" aria-label="Code compiler pane">
+            <section className="pixel-panel rounded-3xl p-5 shadow-xl" aria-label="Code compiler pane - restrained no decorative clutter near editor">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.3em] text-emerald-300">Python compiler</p>
+                  <p className="text-xs uppercase tracking-[0.3em] text-emerald-300">Python compiler · clean editor zone</p>
                   <h2 className="mt-2 text-2xl font-black">Code terminal</h2>
                   <p className="mt-1 text-sm text-slate-400">Runtime badge: Python 3 · /api/run · Ctrl/Cmd+Enter to run. Dark terminal preserved for readability.</p>
                 </div>
@@ -559,14 +559,14 @@ export default function Home() {
                   <button className="rounded-xl bg-yellow-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-yellow-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit()}>{activeChallenge.isBoss ? "Submit Boss" : "Submit"}</button>
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-3">
+              <div className="rounded-2xl border border-slate-700 bg-slate-950/90 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400"><span>solution.py</span><span>Tab/Shift+Tab · auto-indent · ligatures off</span></div>
                 <div className="grid grid-cols-[3rem_1fr] gap-3">
                   <pre aria-hidden="true" className="select-none text-right font-mono text-sm leading-6 text-slate-500">{lineNumbers(code)}</pre>
                   <textarea ref={textareaRef} aria-label="Python solution editor" className="min-h-[34rem] resize-y bg-transparent font-mono text-sm leading-6 text-slate-100 outline-none [font-feature-settings:'liga'_0,'calt'_0]" spellCheck={false} value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={handleEditorKeyDown} />
                 </div>
               </div>
-              <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4" aria-label="Console result drawer">
+              <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-black/30 p-4" aria-label="Console result drawer">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="font-bold">Console / result drawer</h3>
                   <StatusPill label={result ? result.status : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />
