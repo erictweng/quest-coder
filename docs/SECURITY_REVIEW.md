@@ -4,7 +4,7 @@
 
 - `/api/run` is a validating HTTP proxy. It does not spawn Python or infer correctness, and runner failure produces `503` rather than a synthetic result.
 - `/api/run` requires a session and checks quest prerequisites before anything is executed. Each session is limited to 30 runs a minute, one run in flight, and 20 seconds of runner time a minute, so a session submitting slow code cannot hold the runner's slots.
-- New sessions are capped globally, and per caller address when `QUEST_CODER_TRUSTED_PROXY_HOPS` says how many proxies sit in front of the app. Without it `x-forwarded-for` is caller controlled and is ignored.
+- New sessions are limited per caller address when `QUEST_CODER_TRUSTED_PROXY_HOPS` says how many proxies sit in front of the app. Without it `x-forwarded-for` is caller controlled and is ignored, and no shared cap is applied, because one caller could use it to lock everyone out. A surge of sign-ups instead triggers deletion of sessions that were never used and have been idle for an hour.
 - Hints and solutions can only be opened for quests the player has unlocked.
 - Runner output is strict JSON: non-finite and oversized numbers are returned as text and grade as wrong answers.
 - Only the active pack and four challenge IDs are accepted. Unknown fields, modes, packs, challenge IDs, and traversal strings are rejected.
@@ -23,7 +23,7 @@ The Python engine rejects imports, file APIs, dynamic execution, dunder access, 
 ## Known limits
 
 - Workers share a filesystem and user with the grader, so pack files are readable by any code that defeats the source checks. Only OS-level isolation closes this.
-- The rate limiters live in process memory, so they are per app instance. Someone creating many sessions can still multiply the per-session runner share.
+- The rate limiters live in process memory, so they are per app instance. Someone creating many sessions can still multiply the per-session runner share, and without a trusted proxy a caller who also writes drafts into each session can grow the database. Put a rate-limiting proxy in front of a public deployment.
 - The address-space limit on workers is not enforced on macOS, so memory is only bounded on Linux hosts.
 - There are no accounts. A save cannot be recovered once its cookie is gone.
 

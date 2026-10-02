@@ -112,7 +112,7 @@ lib/                 contracts, runner client, progress repository
 runner/packs/        pack source of truth, including private grading fixtures
 runner/service/      separately deployable HTTP gateway
 runner/tests/        execution and boundary tests
-scripts/             pack projection generator and pack validator
+scripts/             pack projection generator
 tests/unit/          progress store, rate limiter and client helper tests
 tests/e2e/           Playwright behavior tests against the production build
 .github/workflows/   release gate

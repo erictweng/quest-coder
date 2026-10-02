@@ -1,15 +1,18 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { newSession, readServerProgress, renameSession, sessionForToken } from "../../../lib/progress-store";
+import { newSession, pruneUntouchedSessions, readServerProgress, renameSession, sessionForToken } from "../../../lib/progress-store";
 import { revealedContent } from "../../../lib/quests";
 import { createRateLimiter } from "../../../lib/rate-limit";
 import { clientAddress } from "../../../lib/client-address";
 import { SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from "../../../lib/session";
 
 const HOUR_MS = 60 * 60_000;
-// Per caller when a trusted proxy tells us who the caller is; the global cap bounds database growth either way.
+// Callers are only limited individually, and only when a trusted proxy tells us who they are.
+// A cap shared by everyone would let one caller lock all new players out, so a surge of sign-ups
+// is answered by deleting sessions nobody ever used instead of refusing new ones.
 const newSessionsPerAddress = createRateLimiter({ limit: 30, windowMs: HOUR_MS });
-const newSessionsGlobal = createRateLimiter({ limit: 2_000, windowMs: HOUR_MS });
+const signUpSurge = createRateLimiter({ limit: 500, windowMs: HOUR_MS });
+const pruneThrottle = createRateLimiter({ limit: 1, windowMs: 60_000 });
 
 export async function GET() {
   const jar = await cookies();
@@ -35,8 +38,8 @@ export async function POST(request: Request) {
   }
 
   const address = clientAddress(request);
-  const perAddress = address ? newSessionsPerAddress(address) : null;
-  const limit = perAddress && !perAddress.allowed ? perAddress : newSessionsGlobal("all");
+  const limit = address ? newSessionsPerAddress(address) : { allowed: true, retryAfterSeconds: 0 };
+  if (!signUpSurge("all").allowed && pruneThrottle("prune").allowed) pruneUntouchedSessions(HOUR_MS);
   if (!limit.allowed) {
     return NextResponse.json({ error: "Too many new sessions. Try again later.", code: "rate_limited" }, { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } });
   }

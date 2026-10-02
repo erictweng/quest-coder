@@ -148,6 +148,8 @@ const EMPTY_REVEALED: Revealed = { hints: {}, solutions: {} };
 const SESSION_NAME_KEY = "quest-coder:session";
 const SIGNED_OUT_KEY = "quest-coder:signed-out";
 const SAVE_DEBOUNCE_MS = 400;
+// Chromium rejects keepalive request bodies somewhere under 64 KiB; stay well below it.
+const KEEPALIVE_MAX_BYTES = 48_000;
 const LOCKED_REASON = "Clear the previous quest with Submit all first";
 const EMPTY_PROGRESS: ProgressState = { cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false };
 
@@ -254,22 +256,32 @@ export default function Home() {
   // Drafts, attempts and preferences are the only state the client writes; the server ignores the rest.
   const { attempts, savedCode, friendsEnabled } = progress;
   const unsavedRef = useRef<string | null>(null);
-  /** Sends any pending save now. `keepalive` lets it finish while the page is closing. */
-  const flushSave = useCallback(() => {
+  /**
+   * Sends any pending save now. Pass `closing` when the page may be going away: the request is
+   * then marked keepalive so it can outlive the page. Browsers refuse large keepalive bodies, so
+   * ordinary saves never use it and an oversized closing save falls back to a normal request.
+   */
+  const flushSave = useCallback((closing = false) => {
     const body = unsavedRef.current;
     if (body === null) return;
     unsavedRef.current = null;
-    void fetch("/api/progress", { method: "PUT", headers: { "content-type": "application/json" }, body, keepalive: true }).catch(() => undefined);
+    const keepalive = closing && new Blob([body]).size <= KEEPALIVE_MAX_BYTES;
+    const keepForRetry = () => { if (unsavedRef.current === null) unsavedRef.current = body; };
+    fetch("/api/progress", { method: "PUT", headers: { "content-type": "application/json" }, body, keepalive })
+      .then((response) => { if (!response.ok && response.status !== 401) keepForRetry(); })
+      // A save that did not go through stays pending, so the next change or flush sends it again.
+      .catch(keepForRetry);
   }, []);
   useEffect(() => {
     if (!userName) return;
     unsavedRef.current = JSON.stringify({ progress: { attempts, savedCode, friendsEnabled } });
-    const timer = window.setTimeout(flushSave, SAVE_DEBOUNCE_MS);
+    const timer = window.setTimeout(() => flushSave(), SAVE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [attempts, savedCode, friendsEnabled, userName, flushSave]);
   useEffect(() => {
-    window.addEventListener("pagehide", flushSave);
-    return () => window.removeEventListener("pagehide", flushSave);
+    const onPageHide = () => flushSave(true);
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
   }, [flushSave]);
 
   useEffect(() => {
@@ -284,11 +296,15 @@ export default function Home() {
     setProgress((current) => current.savedCode[activeChallenge.id] === code ? current : ({ ...current, savedCode: { ...current.savedCode, [activeChallenge.id]: code } }));
   }, [activeChallenge.id, code, userName]);
 
+  // A ref, not state: the keyboard shortcut can fire twice before a re-render disables anything.
+  const runInFlightRef = useRef(false);
   const submit = useCallback(async (mode: "run" | "submit" = "run") => {
+    if (runInFlightRef.current || !userName) return;
     if (isActiveLocked) {
       setRunError("This challenge is locked. Clear the prerequisite quests first.");
       return;
     }
+    runInFlightRef.current = true;
     setIsRunning(true);
     setRunError(null);
     setResult(null);
@@ -340,9 +356,10 @@ export default function Home() {
       // Submissions tab never silently stays empty after Run basic / Submit all.
       recordAttempt(attemptFromFailure(message, context));
     } finally {
+      runInFlightRef.current = false;
       setIsRunning(false);
     }
-  }, [activeChallenge, code, isActiveLocked, progress.hintsOpened, progress.solutionOpened]);
+  }, [activeChallenge, code, isActiveLocked, progress.hintsOpened, progress.solutionOpened, userName]);
 
   useEffect(() => {
     if (!playing || events.length === 0) return;
@@ -379,7 +396,7 @@ export default function Home() {
 
   /** Hides the profile on this browser. The save stays on the server and resumes at the next sign-in. */
   function signOut() {
-    flushSave();
+    flushSave(true);
     safeLocalStorageSet(SIGNED_OUT_KEY, "1");
     setUserName(null);
     setProgress(EMPTY_PROGRESS);

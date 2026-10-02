@@ -97,13 +97,25 @@ test("runner unavailable clears stale success and gives retry guidance", async (
 });
 
 test("drafts survive a reload and logging out keeps the save", async ({ page, context }) => {
+  // The page saves once right after sign-in; let that land before seeding, or it would overwrite the seed.
+  const firstSave = page.waitForResponse((response) => response.url().endsWith("/api/progress") && response.request().method() === "PUT");
   await signIn(page, "Draft Ranger");
+  await firstSave;
+  // Give the save file large drafts for the other quests, so every save from here on is bigger
+  // than browsers allow for keepalive requests. Ordinary saves must still go through.
+  const padding = "# a long comment line that pads this draft out\n".repeat(480);
+  const seeded = await context.request.put("/api/progress", { data: { progress: { savedCode: Object.fromEntries(path.slice(1).map((challenge: any) => [challenge.id, padding])) } } });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByText("Signed in as")).toContainText("Draft Ranger");
   await page.getByRole("button", { name: "Continue Last Quest" }).click();
 
   const draft = "def count_routes(n):\n    return 1  # my draft";
   const saved = page.waitForResponse((response) => response.url().endsWith("/api/progress") && response.request().method() === "PUT" && (response.request().postData() ?? "").includes("my draft"));
   await setCode(page, draft);
-  await saved;
+  const save = await saved;
+  expect(save.ok()).toBeTruthy();
+  expect((save.request().postData() ?? "").length).toBeGreaterThan(64_000);
   await page.reload();
   await expect(page.getByText("Signed in as")).toContainText("Draft Ranger");
   await page.getByRole("button", { name: "Continue Last Quest" }).click();
@@ -111,6 +123,16 @@ test("drafts survive a reload and logging out keeps the save", async ({ page, co
   // Give the autosave a chance to (wrongly) write starter code back, then check the server copy.
   await page.waitForTimeout(1_000);
   expect((await (await context.request.get("/api/progress")).json()).progress.savedCode[path[0].id]).toBe(draft);
+
+  // The run shortcut cannot start a second run while one is in flight.
+  let runRequests = 0;
+  page.on("request", (request) => { if (request.url().endsWith("/api/run")) runRequests += 1; });
+  const editor = page.getByLabel("Python solution editor");
+  await editor.focus();
+  await editor.press("ControlOrMeta+Enter");
+  await editor.press("ControlOrMeta+Enter");
+  await expect(page.getByTestId("result-summary")).toBeVisible();
+  expect(runRequests).toBe(1);
 
   await submitAndAdvance(page, path[0]);
   await page.getByRole("button", { name: "Home" }).click();
