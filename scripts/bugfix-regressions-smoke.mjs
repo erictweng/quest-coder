@@ -11,6 +11,7 @@ import { pathToFileURL } from "node:url";
 
 const root = process.cwd();
 const page = readFileSync(`${root}/app/page.tsx`, "utf8");
+const css = readFileSync(`${root}/app/globals.css`, "utf8");
 const route = readFileSync(`${root}/app/api/run/route.ts`, "utf8");
 const pack = JSON.parse(readFileSync(`${root}/content/packs/forest-of-patience-climbing-stairs.json`, "utf8"));
 
@@ -222,6 +223,13 @@ await milestone("Editor key handler is wired to the helpers without breaking Ctr
   }
   assert(!page.includes("const TABS ="), "legacy TABS constant should be gone");
   assert(page.includes("function applyEditorEdit(edit: EditorEdit)"), "applyEditorEdit missing");
+});
+
+await milestone("Completion moment shows checkmark, gentle fireworks, and next quest CTA", async () => {
+  for (const token of ["CompletionMoment", "data-testid=\"completion-moment\"", "✓", "firework", "Move to next quest", "moveToNextQuest", "setPassMoment(true)"]) {
+    assert(page.includes(token), `completion moment missing ${token}`);
+  }
+  assert(css.includes("@keyframes gentle-firework") && css.includes(".completion-moment"), "completion fireworks CSS missing");
 });
 
 await milestone("One-question Climbing Stairs workflow is preserved", async () => {

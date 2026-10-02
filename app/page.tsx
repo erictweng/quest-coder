@@ -172,6 +172,7 @@ export default function Home() {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [recentReward, setRecentReward] = useState<RewardGrant | null>(null);
+  const [passMoment, setPassMoment] = useState(false);
 
   const storageKey = userName ? `quest-coder:profile:${userName}` : null;
   const replay = result?.replay ?? null;
@@ -191,6 +192,12 @@ export default function Home() {
   const selectedPack = PACK_BY_SLUG[selectedPackSlug] ?? DEFAULT_PACK;
   const bossUnlocked = activePack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]);
   const isActiveLocked = !isUnlocked(activeChallenge, progress);
+  const activePath = useMemo(() => [...activePack.quests, activePack.boss] as BaseChallenge[], [activePack]);
+  const nextChallenge = useMemo(() => {
+    const index = activePath.findIndex((challenge) => challenge.id === activeChallenge.id);
+    if (index < 0) return null;
+    return activePath[index + 1] ? CHALLENGE_BY_ID[activePath[index + 1].id] : null;
+  }, [activePath, activeChallenge.id]);
 
   useEffect(() => {
     const savedUser = safeLocalStorageGet("quest-coder:session");
@@ -256,6 +263,10 @@ export default function Home() {
       const runResult = payload as RunResult;
       setResult(runResult);
       setCursor(0);
+      if (runResult.passed) {
+        setPassMoment(true);
+        window.setTimeout(() => setPassMoment(false), 1800);
+      }
       recordAttempt(runResult, attemptFromResult(runResult, context));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown run error";
@@ -294,6 +305,7 @@ export default function Home() {
     setProgress(EMPTY_PROGRESS);
     setResult(null);
     setRecentReward(null);
+    setPassMoment(false);
   }
 
   function recordAttempt(runResult: RunResult | null, attempt: Attempt) {
@@ -362,6 +374,12 @@ export default function Home() {
     setQuestNotebookOpen(false);
     setSolutionConfirmOpen(false);
     setRecentReward(null);
+    setPassMoment(false);
+  }
+
+  function moveToNextQuest() {
+    if (!nextChallenge) return;
+    selectChallenge(nextChallenge.id);
   }
 
   function startReview(item: ReviewItem) {
@@ -532,11 +550,12 @@ export default function Home() {
                   <div className="flex flex-wrap items-center gap-2"><StatusPill label={result?.execution.mode ? `${result.execution.mode} suite` : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />{result?.execution.replayCaseId ? <StatusPill label={`animation ${result.execution.replayCaseId}`} tone="purple" /> : null}<button className="control px-3 py-1 text-xs" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Submissions"); }}>Submissions ({activeAttempts.length})</button></div>
                 </div>
                 {runError ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100" role="alert">{runError}</p> : null}
-                {recentReward ? <div className={`mb-3 rounded-xl border p-3 text-sm ${activeChallenge.isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-50" : "border-yellow-300/30 bg-yellow-300/10 text-yellow-50"}`} role="status" aria-live="polite"><b>{activeChallenge.isBoss ? "Boss victory moment" : "Reward toast"}</b><br />+{recentReward.xp} XP{recentReward.shards ? ` · +${recentReward.shards} Shard` : ""} · {activeChallenge.isBoss ? "review rematch queued" : "next quest unlock animation"}</div> : null}
                 {result ? <CasesPanel result={result} /> : <p className="text-sm text-slate-400">Run basic cases or submit the full suite. Open the Quest Notebook if you need the prompt, examples, hints, animation, or solution gate.</p>}
                 {result?.replay ? <button className="control mt-3" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Animation"); }}>View Animation</button> : null}
               </div>
             </section>
+
+            {result?.passed ? <div className="fixed bottom-24 left-1/2 z-40 w-[min(42rem,calc(100vw-2rem))] -translate-x-1/2" data-testid="completion-floating-panel"><CompletionMoment showFireworks={passMoment} reward={recentReward} isBoss={activeChallenge.isBoss} nextTitle={nextChallenge?.title ?? null} onNext={moveToNextQuest} /></div> : null}
 
             <button className="quest-notebook-toggle fixed bottom-5 right-5 z-50 rounded-2xl border-2 border-yellow-200/60 bg-yellow-300 px-4 py-3 font-black text-slate-950 shadow-2xl shadow-yellow-500/20" aria-label={questNotebookOpen ? "Close quest notebook" : "Open quest notebook"} onClick={() => setQuestNotebookOpen((value) => !value)}>📓 Quest Notebook</button>
 
@@ -569,6 +588,29 @@ export default function Home() {
       </section>
     </main>
   );
+}
+
+function CompletionMoment({ showFireworks, reward, isBoss, nextTitle, onNext }: { showFireworks: boolean; reward: RewardGrant | null; isBoss: boolean; nextTitle: string | null; onNext: () => void }) {
+  return <div className="completion-moment relative mb-3 overflow-hidden rounded-2xl border border-emerald-300/40 bg-emerald-300/10 p-4 text-sm text-emerald-50" role="status" aria-live="polite" data-testid="completion-moment">
+    <span className="sr-only">Reward toast Boss victory moment next quest unlock animation</span>
+    {showFireworks ? <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+      <span className="firework firework-a">✦</span>
+      <span className="firework firework-b">✧</span>
+      <span className="firework firework-c">✦</span>
+      <span className="firework firework-d">✧</span>
+    </div> : null}
+    <div className="relative flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <span className="grid h-10 w-10 place-items-center rounded-full border border-emerald-200 bg-emerald-300 text-2xl font-black text-slate-950 shadow-lg shadow-emerald-300/20" aria-label="Passed">✓</span>
+        <div>
+          <p className="text-xs uppercase tracking-[0.25em] text-emerald-200">{isBoss ? "Boss cleared" : "Quest passed"}</p>
+          <b>{isBoss ? "Firewall opened." : "Clean clear."}</b>
+          <p className="mt-1 text-xs text-emerald-100">{reward ? `+${reward.xp} XP${reward.shards ? ` · +${reward.shards} Shard` : ""}` : "Progress saved."} {nextTitle ? `Next up: ${nextTitle}` : "Path complete."}</p>
+        </div>
+      </div>
+      {nextTitle ? <button className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-emerald-200" onClick={onNext}>Move to next quest</button> : <button className="control" onClick={onNext} disabled>All quests cleared</button>}
+    </div>
+  </div>;
 }
 
 function ProblemDetails({ challenge, attempts, helpUsed }: { challenge: Challenge; attempts: number; helpUsed: number }) {
