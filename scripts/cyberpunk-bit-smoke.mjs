@@ -32,13 +32,13 @@ milestone("Cyberpunk primitives exist", () => {
 });
 
 milestone("Hub, Campaign, and Solve use cyberpunk primitives", () => {
-  for (const token of ["Cyberpunk Bit Hub Arcade Terminal", "Neon districts", "Pellet route", "Firewall gate", "Cyberpunk solve encounter restrained editor-safe", "Encounter frame"]) {
+  for (const token of ["Cyberpunk Bit Hub Arcade Terminal", "Neon districts", "Pellet route", "Firewall gate", "Full-screen compiler workspace", "Quest Notebook"]) {
     assert(page.includes(token), `page missing ${token}`);
   }
 });
 
-milestone("Split-pane solve and readable editor survive", () => {
-  for (const token of ["Focused split-pane solve screen", "Question", "Code compiler pane", "font-mono", "solution.py", "ligatures off", "clean editor zone"]) {
+milestone("Full-screen solve and readable editor survive", () => {
+  for (const token of ["one-question-workspace", "Question", "Code compiler pane", "font-mono", "solution.py", "font-feature-settings", "full-screen focus"]) {
     assert(page.includes(token), `solve/editor missing ${token}`);
   }
 });

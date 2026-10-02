@@ -12,10 +12,12 @@ const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 let activeRuns = 0;
 let queuedRuns = 0;
 
+type RunMode = "run" | "submit";
 type RunRequest = {
   source?: unknown;
   packSlug?: unknown;
   challengeId?: unknown;
+  mode?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -32,8 +34,9 @@ export async function POST(request: Request) {
   const sourceCheck = validateSource(body.source);
   if (!sourceCheck.ok) return NextResponse.json({ error: sourceCheck.error, queue: queueSnapshot() }, { status: 400 });
 
-  const packSlugValue = typeof body.packSlug === "string" ? body.packSlug : "timequake-search-rotated-array";
-  const challengeIdValue = typeof body.challengeId === "string" ? body.challengeId : "boss-search";
+  const packSlugValue = typeof body.packSlug === "string" ? body.packSlug : "forest-of-patience-climbing-stairs";
+  const challengeIdValue = typeof body.challengeId === "string" ? body.challengeId : "boss-old-bramblehorn";
+  const mode: RunMode = body.mode === "submit" ? "submit" : "run";
 
   try {
     const pack = loadQuestPack(packSlugValue);
@@ -41,12 +44,14 @@ export async function POST(request: Request) {
     const result = await withRunnerSlot(() => runQuestRunner({
       source: body.source as string,
       packPath: packPath(packSlugValue),
-      challengeId: challenge.id
+      challengeId: challenge.id,
+      mode
     }));
     return NextResponse.json({
       ...result,
       pack: { id: pack.id, slug: pack.slug, title: pack.title },
       challenge: { id: challenge.id, title: challenge.title },
+      mode,
       queue: queueSnapshot(),
       security: { profile: "public-hardening-v0", network: "blocked-by-no-import-runner", filesystem: "read-only-by-no-open-runner", timelineRetention: "compressed-to-3000-events" }
     });
@@ -58,7 +63,7 @@ export async function POST(request: Request) {
   }
 }
 
-function runQuestRunner(payload: { source: string; packPath: string; challengeId: string }) {
+function runQuestRunner(payload: { source: string; packPath: string; challengeId: string; mode: RunMode }) {
   return new Promise<Record<string, unknown>>((resolve, reject) => {
     const repoRoot = process.cwd();
     const child = spawn("python3", ["runner/quest_runner_cli.py"], {

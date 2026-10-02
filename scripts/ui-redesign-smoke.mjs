@@ -10,7 +10,7 @@ const cyberReport = readFileSync(`${root}/docs/CYBERPUNK_BIT_FINAL_REGRESSION.md
 function assert(condition, message) { if (!condition) throw new Error(message); }
 function milestone(name, fn) { fn(); console.log(`ok - ${name}`); }
 
-const solveStart = page.indexOf('aria-label="Focused split-pane solve screen"');
+const solveStart = page.indexOf('one-question-workspace');
 const statusPillStart = page.indexOf('function StatusPill');
 const solveBranch = page.slice(solveStart, statusPillStart);
 const editorStart = solveBranch.indexOf('aria-label="Code compiler pane');
@@ -35,12 +35,12 @@ milestone("Campaign and questions flow opens focused solve", () => {
   }
 });
 
-milestone("Solve screen preserves split-pane coding workflow", () => {
-  for (const token of ["Focused split-pane solve screen", "Question", "Code compiler pane", "Problem statement", "Python solution editor", "Console / result drawer", "Run ▶", "Submit"]) {
+milestone("Solve screen preserves full-screen coding workflow", () => {
+  for (const token of ["Full-screen compiler workspace", "one-question-workspace", "Quest Notebook", "Code compiler pane", "Problem statement", "Python solution editor", "Console / result drawer", "Run basic", "Submit all"]) {
     assert(solveBranch.includes(token), `solve missing ${token}`);
   }
   assert(editorBranch.includes("font-mono"), "editor must stay monospace");
-  assert(editorBranch.includes("min-h-[34rem]"), "editor height should remain substantial");
+  assert(editorBranch.includes("min-h-[62vh]"), "editor should dominate the viewport");
 });
 
 milestone("Optional support tabs and contextual rewards survive", () => {
@@ -48,6 +48,7 @@ milestone("Optional support tabs and contextual rewards survive", () => {
     assert(solveBranch.includes(token), `support/reward missing ${token}`);
   }
   assert(solveBranch.includes('solveTab === "Animation"'), "animation content must stay tab-gated");
+  assert(solveBranch.includes("Quest Notebook"), "support tabs should live in the notebook overlay");
 });
 
 milestone("Cyberpunk Bit visual system and readability boundaries survive", () => {

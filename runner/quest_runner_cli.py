@@ -40,13 +40,18 @@ def challenge_from_pack(pack: dict[str, Any], challenge_id: str) -> dict[str, An
     raise ValueError(f"challenge not found: {challenge_id}")
 
 
-def load_pack_challenge(pack_path: str, challenge_id: str) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+def load_pack_challenge(pack_path: str, challenge_id: str, mode: str = "submit") -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
     pack = json.loads(Path(pack_path).read_text())
     challenge = challenge_from_pack(pack, challenge_id)
-    tests = list(challenge.get("tests", {}).get("fixed", []))
+    test_spec = challenge.get("tests", {})
+    suite_name = "submit" if mode == "submit" else "run"
+    tests = list(test_spec.get(suite_name) or test_spec.get("fixed", []))
     if not tests:
-        raise ValueError(f"challenge has no fixed tests: {challenge_id}")
-    return pack, challenge, tests
+        raise ValueError(f"challenge has no {suite_name} tests: {challenge_id}")
+    replay_case_id = test_spec.get("replayCaseId") or next(iter(test_spec.get("replayCaseIds", [])), None)
+    all_tests = list(test_spec.get("submit") or test_spec.get("fixed", []))
+    replay_test = next((test for test in all_tests if test.get("id") == replay_case_id), None)
+    return pack, challenge, tests, replay_test
 
 
 def main() -> int:
@@ -57,9 +62,13 @@ def main() -> int:
             raise ValueError("source must be a non-empty string")
 
         if "packPath" in payload or "challengeId" in payload:
-            pack, challenge, tests = load_pack_challenge(
-                str(payload.get("packPath", "content/packs/timequake-search-rotated-array.json")),
-                str(payload.get("challengeId", "boss-search")),
+            mode = str(payload.get("mode", "submit"))
+            if mode not in {"run", "submit"}:
+                mode = "run"
+            pack, challenge, tests, replay_test = load_pack_challenge(
+                str(payload.get("packPath", "content/packs/forest-of-patience-climbing-stairs.json")),
+                str(payload.get("challengeId", "boss-old-bramblehorn")),
+                mode,
             )
             timeout_ms = int(pack.get("runtime", {}).get("timeLimitMs", 2000))
             max_events = int(pack.get("runtime", {}).get("timelineEventCap", 3000))
@@ -68,6 +77,8 @@ def main() -> int:
             limit = budget_limit(challenge, tests)
         else:
             tests = default_tests()
+            replay_test = tests[0]
+            mode = "submit"
             timeout_ms = 2000
             max_events = 3000
             quest_id = "timequake-search-rotated-array"
@@ -82,6 +93,8 @@ def main() -> int:
             budget_limit=limit,
             timeout_ms=timeout_ms,
             max_events=max_events,
+            mode=mode,
+            replay_test=replay_test,
         )
         print(json.dumps(result))
         return 0

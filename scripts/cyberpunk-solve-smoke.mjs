@@ -8,11 +8,12 @@ const plan = readFileSync(`${root}/docs/CYBERPUNK_BIT_MILESTONE_PLAN.md`, "utf8"
 function assert(condition, message) { if (!condition) throw new Error(message); }
 function milestone(name, fn) { fn(); console.log(`ok - ${name}`); }
 
-const solveIndex = page.indexOf('aria-label="Focused split-pane solve screen"');
+const solveIndex = page.indexOf('one-question-workspace');
 const postSolveIndex = page.indexOf('function StatusPill');
 const solveBranch = page.slice(solveIndex, postSolveIndex);
 const editorStart = solveBranch.indexOf('aria-label="Code compiler pane');
-const editorBranch = solveBranch.slice(editorStart);
+const notebookStart = solveBranch.indexOf('quest-notebook-toggle');
+const editorBranch = solveBranch.slice(editorStart, notebookStart);
 
 milestone("Cyberpunk milestone 5 plan exists", () => {
   for (const token of ["Milestone 5 — Solve Encounter Restraint Pass", "solve mode", "Left pane", "Right editor", "free of decorative sprites"]) {
@@ -21,13 +22,13 @@ milestone("Cyberpunk milestone 5 plan exists", () => {
 });
 
 milestone("Solve screen uses Cyberpunk encounter frame", () => {
-  for (const token of ["Cyberpunk solve encounter restrained editor-safe", "Encounter frame", "terminal-card", "neon-maze-panel", "pellet-node", "Mini cyberpunk maze categories and quest path"]) {
+  for (const token of ["Full-screen compiler workspace", "one-question-workspace", "Quest Notebook", "terminal-card", "neon-maze-panel", "pellet-node", "Mini quest path"]) {
     assert(solveBranch.includes(token), `solve branch missing ${token}`);
   }
 });
 
 milestone("Editor remains clean and readable", () => {
-  for (const token of ["Code compiler pane - restrained no decorative clutter near editor", "clean editor zone", "font-mono", "solution.py", "bg-slate-950/90", "ligatures off"]) {
+  for (const token of ["Code compiler pane - restrained no decorative clutter near editor", "full-screen focus", "font-mono", "solution.py", "bg-slate-950/95", "font-feature-settings"]) {
     assert(editorBranch.includes(token), `editor branch missing ${token}`);
   }
   for (const forbidden of ["sky-asset", "/art/sky-island/", "SceneRenderer replay={replay}"]) {
@@ -37,7 +38,7 @@ milestone("Editor remains clean and readable", () => {
 
 milestone("Animation remains optional behind tab", () => {
   assert(solveBranch.includes('"Animation"'), "animation tab missing");
-  assert(solveBranch.includes('View Animation'), "failure CTA to animation missing");
+  assert(solveBranch.includes('View Animation'), "CTA to animation missing");
   assert(solveBranch.includes('solveTab === "Animation"'), "animation content should be tab-gated");
 });
 

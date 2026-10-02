@@ -22,6 +22,13 @@ USER_FILENAME = "<quest-user>"
 BLOCKED_SOURCE_NAMES = {"open", "eval", "exec", "compile", "input", "globals", "locals", "vars", "dir", "getattr", "setattr", "delattr", "__import__"}
 BLOCKED_ATTRIBUTE_ROOTS = {"os", "sys", "socket", "subprocess", "pathlib", "shutil"}
 TRACKED_NAMES = {
+    "a",
+    "b",
+    "i",
+    "n",
+    "ways",
+    "dp",
+    "memo",
     "l",
     "left",
     "lo",
@@ -487,7 +494,11 @@ def run_one_case(
     }
 
 
-def choose_replay_case(cases: PyList[Dict[str, Any]], tests: PyList[Dict[str, Any]]) -> int:
+def choose_replay_case(cases: PyList[Dict[str, Any]], tests: PyList[Dict[str, Any]], replay_case_id: Optional[str] = None) -> int:
+    if replay_case_id:
+        for idx, test in enumerate(tests):
+            if test.get("id") == replay_case_id:
+                return idx
     for idx, case in enumerate(cases):
         if case["status"] != "passed":
             return idx
@@ -503,6 +514,8 @@ def run_submission(
     budget_limit: Optional[int] = None,
     timeout_ms: int = 1000,
     max_events: int = 3000,
+    mode: str = "submit",
+    replay_test: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run source against tests, then replay one case with tracing enabled."""
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -518,12 +531,13 @@ def run_submission(
         )
         for test in tests
     ]
-    replay_index = choose_replay_case(fast_cases, tests)
+    replay_source = replay_test or (tests[choose_replay_case(fast_cases, tests)] if tests else None)
+    replay_index = choose_replay_case(fast_cases, tests, replay_source.get("id") if replay_source else None)
     replay_case = None
-    if replay_index >= 0:
+    if replay_source is not None:
         replay_case = run_one_case(
             source,
-            tests[replay_index],
+            replay_source,
             entrypoint=entrypoint,
             trace=True,
             budget_limit=budget_limit,
@@ -543,7 +557,7 @@ def run_submission(
         "status": top_status,
         "passed": top_status == "passed",
         "startedAt": started_at,
-        "execution": {"passes": ["fast", "traced_replay"], "replayCaseIndex": replay_index},
+        "execution": {"passes": [mode, "traced_replay"], "mode": mode, "suiteSize": len(tests), "replayCaseIndex": replay_index, "replayCaseId": replay_case.get("caseId") if replay_case else None},
         "cases": fast_cases,
         "replay": replay_case,
         "limits": {"maxEvents": max_events, "maxDurationMs": timeout_ms, "maxReads": budget_limit},

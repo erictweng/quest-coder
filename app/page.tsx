@@ -49,7 +49,7 @@ type RunResult = {
   status: Status;
   passed: boolean;
   startedAt: string;
-  execution: { passes: string[]; replayCaseIndex: number };
+  execution: { passes: string[]; replayCaseIndex: number; mode?: "run" | "submit"; suiteSize?: number; replayCaseId?: string | null };
   cases: ReplayCase[];
   replay: ReplayCase | null;
   limits: { maxEvents: number; maxDurationMs: number; maxReads?: number };
@@ -58,12 +58,14 @@ type RunResult = {
 };
 
 type Hint = { id: string; text: string; cost: string };
+type ProblemExample = { input: string; output: string; explanation: string };
+type ProblemPrompt = { statement: string; gamifiedStatement: string; inputs: string[]; output: string; guarantees: string[]; examples: ProblemExample[] };
 type ReviewVariant = { id: string; title: string; mutation: string };
 type PackReview = { enabled: boolean; defaultSchedule: number[]; variants: ReviewVariant[]; rules?: Record<string, unknown> };
 type Pack = {
   slug: string;
   title: string;
-  metadata: { shortDescription: string; displayName?: string };
+  metadata: { shortDescription: string; displayName?: string; category?: string; topic?: string };
   concepts: string[];
   scene: { type: "array" | "linked_list" };
   quests: BaseChallenge[];
@@ -77,6 +79,7 @@ type BaseChallenge = {
   brief: string;
   starterCode: string;
   solution: { code: string };
+  problem?: ProblemPrompt;
   hints?: Hint[];
   unlock: { requiresQuestIds: string[]; requiresPassed: boolean };
 };
@@ -167,6 +170,8 @@ export default function Home() {
   const [selectedPackSlug, setSelectedPackSlug] = useState(DEFAULT_PACK.slug);
   const [questionFilter, setQuestionFilter] = useState<QuestionFilter>("All");
   const [solveTab, setSolveTab] = useState<SolveTab>("Question");
+  const [questNotebookOpen, setQuestNotebookOpen] = useState(false);
+  const [solutionConfirmOpen, setSolutionConfirmOpen] = useState(false);
   const [activeId, setActiveId] = useState(DEFAULT_PACK.quests[0]?.id ?? DEFAULT_PACK.boss.id);
   const activeChallenge = useMemo(() => CHALLENGES.find((challenge) => challenge.id === activeId) ?? CHALLENGES[0], [activeId]);
   const [code, setCode] = useState(activeChallenge.starterCode);
@@ -227,7 +232,7 @@ export default function Home() {
     setProgress((current) => current.savedCode[activeChallenge.id] === code ? current : ({ ...current, savedCode: { ...current.savedCode, [activeChallenge.id]: code } }));
   }, [activeChallenge.id, code, storageKey]);
 
-  const submit = useCallback(async () => {
+  const submit = useCallback(async (mode: "run" | "submit" = "run") => {
     if (isActiveLocked) {
       setRunError("This challenge is locked. Clear the prerequisite quests first.");
       return;
@@ -239,7 +244,7 @@ export default function Home() {
       const response = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: code, packSlug: activeChallenge.packSlug, challengeId: activeChallenge.id })
+        body: JSON.stringify({ source: code, packSlug: activeChallenge.packSlug, challengeId: activeChallenge.id, mode })
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Runner request failed");
@@ -349,6 +354,8 @@ export default function Home() {
     if (challenge) setSelectedPackSlug(challenge.packSlug);
     setActiveId(id);
     setSurface("solve");
+    setQuestNotebookOpen(false);
+    setSolutionConfirmOpen(false);
     setRecentReward(null);
   }
 
@@ -369,7 +376,7 @@ export default function Home() {
   function handleEditorKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
-      void submit();
+      void submit("run");
       return;
     }
     if (event.key === "Tab") {
@@ -394,41 +401,55 @@ export default function Home() {
   return (
     <main className="cyber-bit-world maze-grid-field pixel-console min-h-screen text-[var(--qc-text)]">
       <section className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 lg:px-8">
-        <header className={surface === "solve" ? "pixel-panel rounded-2xl px-4 py-3" : "pixel-panel rounded-3xl p-6"}>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 15.6 Cyberpunk Bit</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater Question + code editor Line numbers Open solution scroll {"onSelect={selectChallenge}"}</span>
-              {surface === "solve" ? <p className="mt-1 text-sm text-slate-400">Workspace mode: no dashboard chrome. Cyberpunk encounter mode. Maze path lives in the question pane.</p> : <><h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">Choose your node path</h1><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Boot the Cyberpunk Bit terminal: choose Profile, Campaign, or Questions, then open the compiler when the quest starts.</p></>}
+        <header className={surface === "solve" ? "sticky top-0 z-40 rounded-none border-b border-cyan-300/20 bg-slate-950/95 px-3 py-2 backdrop-blur" : "pixel-panel rounded-3xl p-6"}>
+          {surface === "solve" ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="control px-3 py-1" onClick={() => setSurface("hub")}>Home</button>
+                <span className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-2 py-1 text-cyan-100">Quest Coder</span>
+                <span className="max-w-[40vw] truncate text-slate-300">{activeChallenge.title}</span>
+                <StatusPill label={result?.execution.mode ? `${result.execution.mode} · ${result.cases.length} cases` : "compiler ready"} tone={result?.passed ? "green" : "cyan"} />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={signOut}>Log out</button></> : <><input className="w-24 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} onChange={(event) => setUserNameDraft(event.target.value)} aria-label="User name" /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950" onClick={signIn}>Sign in</button></>}
+              </div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-              {userName ? (
-                <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-300">Signed in as <b className="text-cyan-200">{userName}</b></span><button className="control" onClick={signOut}>Log out</button></div>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} onChange={(event) => setUserNameDraft(event.target.value)} aria-label="User name" /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950" onClick={signIn}>Sign in</button></div>
-              )}
-            </div>
-          </div>
-          {surface !== "solve" ? <>
-            <nav className="mt-5 flex flex-wrap gap-2 text-sm" aria-label="Quest Coder primary surfaces">
-              <button className={surface === "hub" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("hub")}>Hub</button>
-              <button className={surface === "profile" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("profile")}>Profile</button>
-              <button className={surface === "campaigns" || surface === "campaignDetail" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("campaigns")}>Campaign</button>
-              <button className={surface === "questions" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("questions")}>Questions</button>
-              <button className="control" onClick={() => setSurface("solve")}>Solve</button>
-            </nav>
-            <div className="mt-4 grid gap-2 text-sm sm:grid-cols-5">
-              <Metric label="Surface" value={surface} />
-              <Metric label="Streak/rating" value={`${topicStats[0]?.streak ?? 0}/${topicStats[0]?.rating ?? 1000}`} />
-              <Metric label="Bosses defeated" value={statBar.label} />
-              <Metric label="Active quest" value={activeChallenge.title} />
-              <Metric label="Queue" value={`${result?.queue?.activeRuns ?? 0}/${result?.queue?.maxConcurrentRuns ?? 2} active`} />
-              <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
-              <Metric label="Reviews due" value={`${dueReviews.length}`} />
-              <Metric label="XP" value={`${progress.rewards.xp}`} />
-              <Metric label="Shards" value={`${progress.rewards.shards}`} />
-            </div>
-            <StatBar stat={statBar} />
-          </> : null}
+          ) : (
+            <>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 15.6 Cyberpunk Bit</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater Question + code editor Line numbers Open solution scroll {"onSelect={selectChallenge}"}</span>
+                  <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">Choose your node path</h1><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Boot the Cyberpunk Bit terminal: choose Profile, Campaign, or Questions, then open the compiler when the quest starts.</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  {userName ? (
+                    <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-300">Signed in as <b className="text-cyan-200">{userName}</b></span><button className="control" onClick={signOut}>Log out</button></div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} onChange={(event) => setUserNameDraft(event.target.value)} aria-label="User name" /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950" onClick={signIn}>Sign in</button></div>
+                  )}
+                </div>
+              </div>
+              <nav className="mt-5 flex flex-wrap gap-2 text-sm" aria-label="Quest Coder primary surfaces">
+                <button className={surface === "hub" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("hub")}>Hub</button>
+                <button className={surface === "profile" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("profile")}>Profile</button>
+                <button className={surface === "campaigns" || surface === "campaignDetail" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("campaigns")}>Campaign</button>
+                <button className={surface === "questions" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("questions")}>Questions</button>
+                <button className="control" onClick={() => setSurface("solve")}>Solve</button>
+              </nav>
+              <div className="mt-4 grid gap-2 text-sm sm:grid-cols-5">
+                <Metric label="Surface" value={surface} />
+                <Metric label="Streak/rating" value={`${topicStats[0]?.streak ?? 0}/${topicStats[0]?.rating ?? 1000}`} />
+                <Metric label="Bosses defeated" value={statBar.label} />
+                <Metric label="Active quest" value={activeChallenge.title} />
+                <Metric label="Queue" value={`${result?.queue?.activeRuns ?? 0}/${result?.queue?.maxConcurrentRuns ?? 2} active`} />
+                <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
+                <Metric label="Reviews due" value={`${dueReviews.length}`} />
+                <Metric label="XP" value={`${progress.rewards.xp}`} />
+                <Metric label="Shards" value={`${progress.rewards.shards}`} />
+              </div>
+              <StatBar stat={statBar} />
+            </>
+          )}
           <span className="sr-only">Public signup/onboarding enter a handle public-hardening-v0 capped replay metadata</span>
         </header>
 
@@ -466,120 +487,104 @@ export default function Home() {
         ) : surface === "questions" ? (
           <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Questions list</h2><p className="text-sm text-slate-400">Select a question to open the focused solve screen.</p></div><div className="flex flex-wrap gap-2 text-xs">{(["All", "Available", "Cleared", "Review", "Boss"] as QuestionFilter[]).map((filter) => <button key={filter} className={questionFilter === filter ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setQuestionFilter(filter)}>{filter}</button>)}</div></div><div className="grid gap-3 md:grid-cols-2">{CHALLENGES.filter((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); if (questionFilter === "Available") return !locked && !cleared && !challenge.isBoss; if (questionFilter === "Cleared") return cleared; if (questionFilter === "Review") return reviewDue; if (questionFilter === "Boss") return challenge.isBoss; return true; }).map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = cleared ? "cleared" : reviewDue ? "review due" : locked ? "locked" : challenge.isBoss ? "boss" : "available"; return <button key={challenge.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:border-cyan-300" onClick={() => selectChallenge(challenge.id)}><b>{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</b><p className="mt-1 text-xs text-slate-400">{challenge.packTitle} · {(progress.attempts[challenge.id] ?? []).length} attempts</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={cleared ? "green" : reviewDue ? "purple" : locked ? "muted" : challenge.isBoss ? "pink" : "cyan"} />{challenge.packConcepts.slice(0, 2).map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></button>; })}</div></section>
         ) : (
-          <section className="solve-split grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]" aria-label="Focused split-pane solve screen">
-            <span className="sr-only">Focused question pane Code compiler pane Code on the right Mini campaign categories and quest path Cyberpunk solve encounter restrained editor-safe</span>
-            <aside className="terminal-card rounded-3xl p-5 shadow-xl shadow-cyan-950/20">
-              <div className="mb-3 flex justify-end"><span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.25em] text-cyan-100">Encounter frame</span></div>
-              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <section className="one-question-workspace relative min-h-[calc(100vh-4rem)]" aria-label="Full-screen compiler workspace">
+            <span className="sr-only">Focused full-screen compiler Quest Notebook bottom right Home top bar run submit split one-question mode confirm before solution</span>
+            <section className="pixel-panel rounded-2xl p-3 shadow-xl" aria-label="Code compiler pane - restrained no decorative clutter near editor">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Encounter pane</p>
-                  <h2 className="mt-2 text-2xl font-black">{activeChallenge.title}</h2>
-                  <p className="mt-1 text-sm text-slate-400">{isActiveLocked ? "locked" : activeChallenge.isBoss ? "boss fight" : "available"} · {activeAttempts.length} attempts · {progress.rewards.xp} XP</p>
-                </div>
-                <button className="control" onClick={() => setSurface("campaignDetail")}>Map</button>
-              </div>
-
-              <div className="neon-maze-panel mb-4 rounded-2xl p-3" aria-label="Mini cyberpunk maze categories and quest path">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="text-xs uppercase tracking-[0.25em] text-purple-200">{activePack.title}</p><span className="text-xs text-slate-400">Pellet route</span></div>
-                <div className="flex flex-wrap gap-2">{[...activePack.quests, activePack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isCurrent = challenge.id === activeChallenge.id; const isBoss = challenge.id === activePack.boss.id; return <button key={challenge.id} className={`pellet-node rounded-xl border px-3 py-2 text-xs font-bold ${isCurrent ? "border-cyan-200 bg-cyan-300 text-slate-950" : cleared ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : locked ? "border-slate-600 bg-slate-800/60 text-slate-400" : isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-100" : "border-white/10 bg-white/5 text-slate-200"}`} onClick={() => selectChallenge(challenge.id)}>{isBoss ? "Firewall" : `Q${challenge.order ?? "?"}`}</button>; })}</div>
-                <p className="mt-3 text-xs text-slate-400">{activePack.concepts.join(" · ")}</p>
-              </div>
-
-              <div className="mb-4 flex flex-wrap gap-2 text-xs" role="tablist" aria-label="Solve support tabs">
-                {(["Question", "Animation", "Hints", "Solution", "Submissions"] as SolveTab[]).map((tab) => (
-                  <button key={tab} role="tab" aria-selected={solveTab === tab} className={solveTab === tab ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => { if (tab === "Hints") openHint(); if (tab === "Solution") openSolution(); setSolveTab(tab); }}>{tab}</button>
-                ))}
-              </div>
-
-              {solveTab === "Question" ? (
-                <div className="space-y-4">
-                  <div className="terminal-card rounded-2xl p-4">
-                    <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">Problem statement</p>
-                    <p className="mt-3 text-base leading-7 text-slate-100">{activeChallenge.brief}</p>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Metric label="Runtime" value="Python 3 · CPython" />
-                    <Metric label="Status" value={isActiveLocked ? "locked" : "ready"} />
-                    <Metric label="Attempts" value={`${activeAttempts.length}`} />
-                    <Metric label="Help used" value={`${progress.hintsOpened[activeChallenge.id] ?? 0} hints`} />
-                  </div>
-                  {recentReward ? <div className={`rounded-2xl border p-4 text-sm ${activeChallenge.isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-50" : "border-yellow-300/30 bg-yellow-300/10 text-yellow-50"}`} role="status" aria-live="polite">
-                    <p className="text-xs uppercase tracking-[0.25em]">{activeChallenge.isBoss ? "Boss victory moment" : "Reward toast"}</p>
-                    <b>{activeChallenge.isBoss ? "Boss cleared." : "Clean clear."} +{recentReward.xp} XP{recentReward.shards ? ` · +${recentReward.shards} Shard` : ""}</b>
-                    <p className="mt-1">{activeChallenge.isBoss ? "Review rematch added to Profile/Campaign. Keep moving when ready." : "Quest unlocked: the next node is ready on the path above."}</p>
-                  </div> : <div className="rounded-2xl border border-yellow-300/20 bg-yellow-300/10 p-4 text-sm text-yellow-50">
-                    <b>Companion tip:</b> solve the prompt first. Open Animation only when you want to trace what happened.
-                  </div>}
-                </div>
-              ) : solveTab === "Animation" ? (
-                <div className="space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-                    <OutcomeBadge status={result?.status ?? "internal_error"} passed={result?.passed ?? false} />
-                    <p className="rounded-xl border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs text-slate-300">Reduced motion safe: replay only moves when you press Play/Step.</p>
-                    <PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} />
-                  </div>
-                  <SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} />
-                  <div className="grid gap-4 lg:grid-cols-2"><CodeTrace code={code} activeLine={activeLine} /><VarsPanel vars={latestVars} event={activeEvent} /></div>
-                </div>
-              ) : solveTab === "Hints" ? (
-                <div className="rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-50">
-                  <h3 className="font-bold">Hints stay secondary</h3>
-                  <p className="mt-2">Opened hints: {progress.hintsOpened[activeChallenge.id] ?? 0}</p>
-                  <p className="mt-3 leading-6">{activeChallenge.hints?.[Math.min((progress.hintsOpened[activeChallenge.id] ?? 1) - 1, (activeChallenge.hints?.length ?? 1) - 1)]?.text ?? "No hint text for this quest yet."}</p>
-                  <button className="control mt-4" onClick={openHint}>Reveal another hint</button>
-                </div>
-              ) : solveTab === "Solution" ? (
-                <details className="rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4" open={Boolean(progress.solutionOpened[activeChallenge.id])}>
-                  <summary className="cursor-pointer text-sm font-bold text-amber-100" onClick={openSolution}>Solution scroll {progress.solutionOpened[activeChallenge.id] ? "opened — solution-assisted" : "hidden"}</summary>
-                  {progress.solutionOpened[activeChallenge.id] ? <pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 font-mono text-xs text-amber-50">{activeChallenge.solution.code}</pre> : <p className="mt-2 text-sm text-slate-400">Open only if you want this clear marked solution-assisted.</p>}
-                </details>
-              ) : (
-                <div className="space-y-4">
-                  <CasesPanel result={result} />
-                  <p className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">Attempt history lives here, not on the workspace front. Review reminders stay in Hub/Profile/Campaign.</p>
-                  <AttemptHistory attempts={activeAttempts} />
-                </div>
-              )}
-            </aside>
-
-            <section className="pixel-panel rounded-3xl p-5 shadow-xl" aria-label="Code compiler pane - restrained no decorative clutter near editor">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.3em] text-emerald-300">Python compiler · clean editor zone</p>
-                  <h2 className="mt-2 text-2xl font-black">Code terminal</h2>
-                  <p className="mt-1 text-sm text-slate-400">Runtime badge: Python 3 · /api/run · Ctrl/Cmd+Enter to run. Dark terminal preserved for readability.</p>
+                  <p className="text-xs uppercase tracking-[0.25em] text-emerald-300">Python compiler · full-screen focus</p>
+                  <h2 className="text-xl font-black">{activeChallenge.title}</h2>
+                  <p className="text-xs text-slate-400">Run checks basic cases. Submit checks the full suite. Animation uses one configured mid-complex replay.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setCode(activeChallenge.solution.code)}>Load passing</button>
                   <button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setCode(activeChallenge.starterCode)}>Reset</button>
-                  <button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-cyan-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit()}>{isRunning ? "Running…" : "Run ▶"}</button>
-                  <button className="rounded-xl bg-yellow-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-yellow-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit()}>{activeChallenge.isBoss ? "Submit Boss" : "Submit"}</button>
+                  <button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-cyan-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit("run")}>{isRunning ? "Running…" : "Run basic ▶"}</button>
+                  <button className="rounded-xl bg-yellow-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-yellow-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit("submit")}>{activeChallenge.isBoss ? "Submit Boss" : "Submit all"}</button>
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-700 bg-slate-950/90 p-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400"><span>solution.py</span><span>Tab/Shift+Tab · auto-indent · ligatures off</span></div>
+              <div className="rounded-2xl border border-slate-700 bg-slate-950/95 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400"><span>solution.py</span><span>Tab/Shift+Tab · Ctrl/Cmd+Enter runs basic cases · solution hidden behind confirmation</span></div>
                 <div className="grid grid-cols-[3rem_1fr] gap-3">
                   <pre aria-hidden="true" className="select-none text-right font-mono text-sm leading-6 text-slate-500">{lineNumbers(code)}</pre>
-                  <textarea ref={textareaRef} aria-label="Python solution editor" className="min-h-[34rem] resize-y bg-transparent font-mono text-sm leading-6 text-slate-100 outline-none [font-feature-settings:'liga'_0,'calt'_0]" spellCheck={false} value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={handleEditorKeyDown} />
+                  <textarea ref={textareaRef} aria-label="Python solution editor" className="min-h-[62vh] resize-y bg-transparent font-mono text-sm leading-6 text-slate-100 outline-none [font-feature-settings:'liga'_0,'calt'_0]" spellCheck={false} value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={handleEditorKeyDown} />
                 </div>
               </div>
-              <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-black/30 p-4" aria-label="Console result drawer">
+              <div className="mt-3 rounded-2xl border border-emerald-300/20 bg-black/40 p-4" aria-label="Console result drawer">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="font-bold">Console / result drawer</h3>
-                  <StatusPill label={result ? result.status : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />
+                  <div className="flex flex-wrap gap-2"><StatusPill label={result?.execution.mode ? `${result.execution.mode} suite` : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />{result?.execution.replayCaseId ? <StatusPill label={`animation ${result.execution.replayCaseId}`} tone="purple" /> : null}</div>
                 </div>
                 {runError ? <p className="rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}
                 {recentReward ? <div className={`mb-3 rounded-xl border p-3 text-sm ${activeChallenge.isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-50" : "border-yellow-300/30 bg-yellow-300/10 text-yellow-50"}`} role="status" aria-live="polite"><b>{activeChallenge.isBoss ? "Boss victory moment" : "Reward toast"}</b><br />+{recentReward.xp} XP{recentReward.shards ? ` · +${recentReward.shards} Shard` : ""} · {activeChallenge.isBoss ? "review rematch queued" : "next quest unlock animation"}</div> : null}
-                {result ? <CasesPanel result={result} /> : <p className="text-sm text-slate-400">Run your code to see cases here. If it fails, open Animation to trace the timeline.</p>}
-                {result && !result.passed ? <button className="control mt-3" onClick={() => setSolveTab("Animation")}>View Animation</button> : null}
-                {result && !result.passed ? <p className="mt-3 text-xs text-amber-100">Next learning step: open the Animation tab on the left.</p> : null}
+                {result ? <CasesPanel result={result} /> : <p className="text-sm text-slate-400">Run basic cases or submit the full suite. Open the Quest Notebook if you need the prompt, examples, hints, animation, or solution gate.</p>}
+                {result?.replay ? <button className="control mt-3" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Animation"); }}>View Animation</button> : null}
               </div>
             </section>
-          </section>
-        )}
+
+            <button className="quest-notebook-toggle fixed bottom-5 right-5 z-50 rounded-2xl border-2 border-yellow-200/60 bg-yellow-300 px-4 py-3 font-black text-slate-950 shadow-2xl shadow-yellow-500/20" aria-label={questNotebookOpen ? "Close quest notebook" : "Open quest notebook"} onClick={() => setQuestNotebookOpen((value) => !value)}>📓 Quest Notebook</button>
+
+            {questNotebookOpen ? (
+              <aside className="quest-notebook-panel fixed bottom-24 right-5 z-50 max-h-[78vh] w-[min(42rem,calc(100vw-2.5rem))] overflow-auto rounded-3xl border-2 border-cyan-300/40 bg-slate-950/98 p-5 shadow-2xl shadow-cyan-950/40" aria-label="Quest notebook pop-out">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div><p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Quest Notebook</p><h2 className="mt-1 text-2xl font-black">{activeChallenge.title}</h2><p className="text-sm text-slate-400">{activePack.title} · {isActiveLocked ? "locked" : activeChallenge.isBoss ? "boss fight" : "available"}</p></div>
+                  <button className="control" onClick={() => setQuestNotebookOpen(false)}>Close</button>
+                </div>
+
+                <div className="neon-maze-panel mb-4 rounded-2xl p-3" aria-label="Mini quest path">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="text-xs uppercase tracking-[0.25em] text-purple-200">Quest path</p><span className="text-xs text-slate-400">one question at a time</span></div>
+                  <div className="flex flex-wrap gap-2">{[...activePack.quests, activePack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isCurrent = challenge.id === activeChallenge.id; const isBoss = challenge.id === activePack.boss.id; return <button key={challenge.id} className={`pellet-node rounded-xl border px-3 py-2 text-xs font-bold ${isCurrent ? "border-cyan-200 bg-cyan-300 text-slate-950" : cleared ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : locked ? "border-slate-600 bg-slate-800/60 text-slate-400" : isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-100" : "border-white/10 bg-white/5 text-slate-200"}`} onClick={() => selectChallenge(challenge.id)}>{isBoss ? "Boss" : `Q${challenge.order ?? "?"}`}</button>; })}</div>
+                </div>
+
+                <div className="mb-4 flex flex-wrap gap-2 text-xs" role="tablist" aria-label="Quest notebook tabs">
+                  {(["Question", "Animation", "Hints", "Solution", "Submissions"] as SolveTab[]).map((tab) => (
+                    <button key={tab} role="tab" aria-selected={solveTab === tab} className={solveTab === tab ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => { if (tab === "Hints") openHint(); if (tab !== "Solution") setSolutionConfirmOpen(false); setSolveTab(tab); }}>{tab}</button>
+                  ))}
+                </div>
+
+                {solveTab === "Question" ? <ProblemDetails challenge={activeChallenge} attempts={activeAttempts.length} helpUsed={progress.hintsOpened[activeChallenge.id] ?? 0} /> : null}
+                {solveTab === "Animation" ? <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3"><OutcomeBadge status={result?.status ?? "internal_error"} passed={result?.passed ?? false} /><p className="rounded-xl border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs text-slate-300">Replay case: {result?.execution.replayCaseId ?? result?.replay?.caseId ?? "run code first"}</p><PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} /></div><SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} /><div className="grid gap-4 lg:grid-cols-2"><CodeTrace code={code} activeLine={activeLine} /><VarsPanel vars={latestVars} event={activeEvent} /></div></div> : null}
+                {solveTab === "Hints" ? <div className="rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-50"><h3 className="font-bold">Hints stay secondary</h3><p className="mt-2">Opened hints: {progress.hintsOpened[activeChallenge.id] ?? 0}</p><p className="mt-3 leading-6">{activeChallenge.hints?.[Math.min((progress.hintsOpened[activeChallenge.id] ?? 1) - 1, (activeChallenge.hints?.length ?? 1) - 1)]?.text ?? "No hint text for this quest yet."}</p><button className="control mt-4" onClick={openHint}>Reveal another hint</button></div> : null}
+                {solveTab === "Solution" ? <SolutionGate revealed={Boolean(progress.solutionOpened[activeChallenge.id])} confirming={solutionConfirmOpen} solution={activeChallenge.solution.code} onAskConfirm={() => setSolutionConfirmOpen(true)} onCancel={() => setSolutionConfirmOpen(false)} onReveal={() => { openSolution(); setSolutionConfirmOpen(false); }} /> : null}
+                {solveTab === "Submissions" ? <div className="space-y-4"><CasesPanel result={result} /><p className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">Attempt history lives here, not on the workspace front. Review reminders stay in Hub/Profile/Campaign.</p><AttemptHistory attempts={activeAttempts} /></div> : null}
+              </aside>
+            ) : null}
+          </section>        )}
       </section>
     </main>
   );
+}
+
+function ProblemDetails({ challenge, attempts, helpUsed }: { challenge: Challenge; attempts: number; helpUsed: number }) {
+  const problem = challenge.problem;
+  if (!problem) {
+    return <div className="terminal-card rounded-2xl p-4"><p className="text-xs uppercase tracking-[0.25em] text-cyan-200">Problem statement</p><p className="mt-3 text-base leading-7 text-slate-100">{challenge.brief}</p></div>;
+  }
+  return <div className="space-y-4">
+    <div className="terminal-card rounded-2xl p-4">
+      <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">Problem statement</p>
+      <h3 className="mt-2 text-xl font-black">{challenge.title}</h3>
+      <p className="mt-3 text-base leading-7 text-slate-100">{problem.statement}</p>
+      <p className="mt-3 rounded-xl border border-purple-300/20 bg-purple-300/10 p-3 text-sm leading-6 text-purple-50">{problem.gamifiedStatement}</p>
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Metric label="Runtime" value="Python 3 · CPython" />
+      <Metric label="Attempts" value={`${attempts}`} />
+      <Metric label="Help used" value={`${helpUsed} hints`} />
+      <Metric label="Goal" value={challenge.isBoss ? "final solve" : "learning quest"} />
+    </div>
+    <div className="grid gap-3 lg:grid-cols-2">
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><h4 className="font-bold text-cyan-100">Inputs</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{problem.inputs.map((item) => <li key={item}>{item}</li>)}</ul></div>
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><h4 className="font-bold text-cyan-100">Output</h4><p className="mt-2 text-sm text-slate-300">{problem.output}</p></div>
+    </div>
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><h4 className="font-bold text-cyan-100">Guarantees</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{problem.guarantees.map((item) => <li key={item}>{item}</li>)}</ul></div>
+    <div className="grid gap-3 lg:grid-cols-2">{problem.examples.map((example, index) => <div key={`${example.input}-${index}`} className="rounded-2xl border border-yellow-300/20 bg-yellow-300/5 p-4"><h4 className="font-bold text-yellow-100">Example {index + 1}</h4><pre className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs text-slate-100">Input: {example.input}\nOutput: {example.output}</pre><p className="mt-2 text-sm text-slate-300">{example.explanation}</p></div>)}</div>
+  </div>;
+}
+
+function SolutionGate({ revealed, confirming, solution, onAskConfirm, onCancel, onReveal }: { revealed: boolean; confirming: boolean; solution: string; onAskConfirm: () => void; onCancel: () => void; onReveal: () => void }) {
+  if (revealed) return <div className="rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4"><h3 className="font-bold text-amber-100">Solution revealed — solution-assisted</h3><pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 font-mono text-xs text-amber-50">{solution}</pre></div>;
+  if (confirming) return <div className="rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-50"><h3 className="font-bold">Reveal solution?</h3><p className="mt-2 leading-6">This will show the reference solution and mark future clears as solution-assisted. Use it only if you want to study the answer.</p><div className="mt-4 flex flex-wrap gap-2"><button className="control" onClick={onCancel}>Cancel</button><button className="rounded-xl bg-amber-300 px-4 py-2 font-bold text-slate-950" onClick={onReveal}>Reveal solution</button></div></div>;
+  return <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300"><h3 className="font-bold text-amber-100">Solution is hidden</h3><p className="mt-2">Opening this tab does not reveal the answer. Confirm first if you want to view it.</p><button className="control mt-4" onClick={onAskConfirm}>I want to view the solution</button></div>;
 }
 
 function StatusPill({ label, tone }: { label: string; tone: "cyan" | "gold" | "green" | "purple" | "pink" | "muted" }) {
