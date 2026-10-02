@@ -128,3 +128,22 @@ test("shop preview costs one shard, once", () => {
   assert.equal(store.unlockShopPreview(hash).rewards.shards, 0);
   assert.equal(store.readServerProgress(hash).rewards.shopPreviewUnlocked, true);
 });
+
+test("pruning removes only sessions that were never used and have gone idle", () => {
+  const abandoned = store.newSession("Abandoned");
+  const drafted = store.newSession("Drafted");
+  store.writeClientProgress(drafted.tokenHash, { savedCode: { "quest-1": "draft" } });
+  const cleared = store.newSession("Cleared");
+  store.applyAuthoritativeClear(cleared.tokenHash, QUEST);
+
+  // Nothing is idle yet, so nothing goes.
+  assert.equal(store.pruneUntouchedSessions(60_000), 0);
+  assert.notEqual(store.sessionForToken(abandoned.token), null);
+
+  const later = new Date(Date.now() + 2 * 60 * 60_000);
+  assert.ok(store.pruneUntouchedSessions(60 * 60_000, later) >= 1);
+  assert.equal(store.sessionForToken(abandoned.token), null);
+  assert.equal(store.sessionForToken(drafted.token)?.displayName, "Drafted");
+  assert.equal(store.sessionForToken(cleared.token)?.displayName, "Cleared");
+  assert.equal(store.readServerProgress(drafted.tokenHash).savedCode["quest-1"], "draft");
+});

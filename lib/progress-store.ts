@@ -95,6 +95,21 @@ export function sessionForToken(token: string | undefined) {
   return { tokenHash: hash, displayName: row.display_name };
 }
 
+/**
+ * Deletes sessions that were created but never used: the save is still exactly
+ * the empty one and nothing has been seen from the cookie for `idleMs`.
+ * Removing them loses nothing, which makes this a safe response to a flood of
+ * sign-ups. Returns how many were deleted.
+ */
+export function pruneUntouchedSessions(idleMs: number, now = new Date()): number {
+  const cutoff = new Date(now.getTime() - idleMs).toISOString();
+  const untouched = JSON.stringify(emptyProgress());
+  const result = db().prepare(`DELETE FROM sessions WHERE last_seen_at < ? AND token_hash IN (SELECT token_hash FROM progress WHERE payload = ?)`).run(cutoff, untouched);
+  // Explicit, so this does not depend on foreign-key enforcement being on.
+  db().prepare("DELETE FROM progress WHERE token_hash NOT IN (SELECT token_hash FROM sessions)").run();
+  return Number(result.changes);
+}
+
 export function renameSession(hash: string, displayName: string) {
   db().prepare("UPDATE sessions SET display_name = ? WHERE token_hash = ?").run(displayName, hash);
 }
