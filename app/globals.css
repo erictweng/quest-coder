@@ -17,14 +17,15 @@
   --qc-red: #FF4D6D;
   --qc-green: #7CFF6B;
   --qc-purple: #A78BFA;
-  --qc-sky: #76C7FF;
-  --qc-sky-soft: #BDEBFF;
-  --qc-cloud: #F4FBFF;
-  --qc-grass: #62D66E;
-  --qc-bark: #7B4A33;
-  --qc-wood: #B8793E;
-  --qc-roof: #2E405F;
-  --qc-blossom: #FF9BCB;
+  --qc-grid: #0B1020;
+  --qc-maze-blue: #2F7DFF;
+  --qc-neon-cyan: #00F5FF;
+  --qc-pac-yellow: #FFE14A;
+  --qc-ghost-pink: #FF4FD8;
+  --qc-ghost-red: #FF4D6D;
+  --qc-power-blue: #5DEBFF;
+  --qc-terminal-green: #36D399;
+  --qc-warning-orange: #FF9F1C;
 }
 
 * {
@@ -60,9 +61,9 @@ input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
 [role="tab"]:focus-visible {
-  outline: 3px solid var(--qc-gold);
+  outline: 3px solid var(--qc-pac-yellow);
   outline-offset: 3px;
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--qc-cyan) 28%, transparent);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--qc-neon-cyan) 28%, transparent);
 }
 
 .control {
@@ -74,80 +75,89 @@ summary:focus-visible,
 }
 
 .control:hover {
-  background: color-mix(in srgb, var(--qc-cyan) 12%, var(--qc-panel));
+  background: color-mix(in srgb, var(--qc-neon-cyan) 12%, var(--qc-panel));
 }
 
 .pixel-console {
   background:
     linear-gradient(color-mix(in srgb, var(--qc-cyan) 4%, transparent) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, var(--qc-purple) 4%, transparent) 1px, transparent 1px),
-    radial-gradient(circle at top, #123456 0, var(--qc-void) 48%, #01030a 100%);
+    radial-gradient(circle at top, color-mix(in srgb, var(--qc-maze-blue) 28%, transparent) 0, var(--qc-void) 48%, #01030a 100%);
   background-size: 18px 18px, 18px 18px, auto;
 }
 
-.sky-island-world {
+.cyber-bit-world {
   background:
-    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--qc-cloud) 92%, transparent) 0 5rem, transparent 5.3rem),
-    radial-gradient(circle at 76% 18%, color-mix(in srgb, var(--qc-cloud) 68%, transparent) 0 4.5rem, transparent 4.9rem),
-    radial-gradient(circle at 52% 4%, color-mix(in srgb, var(--qc-sky-soft) 70%, transparent), transparent 24rem),
-    linear-gradient(180deg, color-mix(in srgb, var(--qc-sky) 76%, var(--qc-night)), var(--qc-void) 70%);
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--qc-ghost-pink) 18%, transparent) 0 4rem, transparent 4.35rem),
+    radial-gradient(circle at 78% 16%, color-mix(in srgb, var(--qc-pac-yellow) 16%, transparent) 0 3.5rem, transparent 3.85rem),
+    linear-gradient(180deg, color-mix(in srgb, var(--qc-grid) 92%, #000), var(--qc-void) 72%);
 }
 
-.cloud-drift {
+.maze-grid-field {
   position: relative;
   overflow: hidden;
 }
 
-.cloud-drift::before,
-.cloud-drift::after {
+.maze-grid-field::before,
+.maze-grid-field::after {
   content: "";
   pointer-events: none;
   position: absolute;
   z-index: 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--qc-cloud) 24%, transparent);
-  filter: blur(0.5px);
+  inset: 0;
 }
 
-.cloud-drift::before {
-  width: 16rem;
-  height: 4rem;
-  top: 4rem;
-  left: -5rem;
-}
-
-.cloud-drift::after {
-  width: 12rem;
-  height: 3rem;
-  right: -3rem;
-  top: 11rem;
-}
-
-.floating-island-panel {
-  border: 2px solid color-mix(in srgb, var(--qc-cloud) 55%, var(--qc-border-muted));
+.maze-grid-field::before {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--qc-cloud) 10%, transparent), transparent 28%),
-    linear-gradient(180deg, color-mix(in srgb, var(--qc-panel-2) 94%, transparent), color-mix(in srgb, var(--qc-bark) 18%, var(--qc-night)));
-  box-shadow: 0 10px 0 color-mix(in srgb, var(--qc-grass) 28%, transparent), 0 24px 48px rgb(0 0 0 / 0.35);
+    linear-gradient(color-mix(in srgb, var(--qc-maze-blue) 16%, transparent) 2px, transparent 2px),
+    linear-gradient(90deg, color-mix(in srgb, var(--qc-maze-blue) 16%, transparent) 2px, transparent 2px);
+  background-size: 4.5rem 4.5rem;
+  mask-image: linear-gradient(180deg, black, transparent 75%);
 }
 
+.maze-grid-field::after {
+  background:
+    radial-gradient(circle at 20% 30%, color-mix(in srgb, var(--qc-pac-yellow) 36%, transparent) 0 0.22rem, transparent 0.26rem),
+    radial-gradient(circle at 55% 18%, color-mix(in srgb, var(--qc-power-blue) 32%, transparent) 0 0.28rem, transparent 0.32rem),
+    radial-gradient(circle at 82% 42%, color-mix(in srgb, var(--qc-ghost-pink) 32%, transparent) 0 0.24rem, transparent 0.28rem);
+  opacity: 0.62;
+}
+
+.neon-maze-panel,
+.floating-island-panel {
+  border: 2px solid color-mix(in srgb, var(--qc-maze-blue) 64%, var(--qc-border-muted));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--qc-neon-cyan) 8%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in srgb, var(--qc-panel-2) 96%, transparent), color-mix(in srgb, var(--qc-grid) 74%, var(--qc-night)));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--qc-neon-cyan) 22%, transparent), 0 0 34px color-mix(in srgb, var(--qc-maze-blue) 18%, transparent), 0 20px 48px rgb(0 0 0 / 0.35);
+}
+
+.terminal-card,
 .wood-sign-panel {
-  border: 2px solid color-mix(in srgb, var(--qc-gold) 55%, var(--qc-bark));
-  background: linear-gradient(180deg, color-mix(in srgb, var(--qc-wood) 34%, var(--qc-panel)), color-mix(in srgb, var(--qc-bark) 28%, var(--qc-night)));
-  box-shadow: 4px 4px 0 color-mix(in srgb, var(--qc-bark) 45%, transparent);
+  border: 2px solid color-mix(in srgb, var(--qc-pac-yellow) 54%, var(--qc-maze-blue));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--qc-panel) 90%, var(--qc-grid)), color-mix(in srgb, var(--qc-grid) 84%, var(--qc-void)));
+  box-shadow: 4px 4px 0 color-mix(in srgb, var(--qc-maze-blue) 45%, transparent), 0 0 26px color-mix(in srgb, var(--qc-neon-cyan) 12%, transparent);
 }
 
+.firewall-gate,
 .sky-gate-boss {
-  border-color: color-mix(in srgb, var(--qc-blossom) 65%, var(--qc-border)) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--qc-roof) 58%, var(--qc-panel)), color-mix(in srgb, var(--qc-pink) 18%, var(--qc-night))) !important;
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--qc-cloud) 16%, transparent), 0 0 28px color-mix(in srgb, var(--qc-blossom) 18%, transparent);
+  border-color: color-mix(in srgb, var(--qc-ghost-pink) 65%, var(--qc-border)) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--qc-panel-2) 68%, var(--qc-ghost-pink)), color-mix(in srgb, var(--qc-ghost-red) 18%, var(--qc-void))) !important;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--qc-power-blue) 16%, transparent), 0 0 30px color-mix(in srgb, var(--qc-ghost-pink) 22%, transparent);
 }
 
+.pellet-node,
 .quest-stepping-stone {
-  border-radius: 999px 999px 1rem 1rem;
-  box-shadow: 0 4px 0 color-mix(in srgb, var(--qc-bark) 35%, transparent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--qc-pac-yellow) 30%, transparent), 0 0 14px color-mix(in srgb, var(--qc-pac-yellow) 16%, transparent);
 }
 
+.power-node {
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--qc-power-blue) 42%, transparent), 0 0 18px color-mix(in srgb, var(--qc-power-blue) 28%, transparent);
+}
+
+.cyber-asset,
 .sky-asset {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
@@ -155,6 +165,7 @@ summary:focus-visible,
   filter: drop-shadow(0 6px 0 rgb(7 8 20 / 0.45));
 }
 
+.cyber-asset-soft,
 .sky-asset-soft {
   opacity: 0.82;
   filter: drop-shadow(0 4px 0 rgb(7 8 20 / 0.22));
@@ -163,7 +174,7 @@ summary:focus-visible,
 .pixel-panel {
   border: 2px solid color-mix(in srgb, var(--qc-border) 24%, transparent);
   background: linear-gradient(180deg, color-mix(in srgb, var(--qc-panel) 92%, transparent), color-mix(in srgb, var(--qc-night) 96%, transparent));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--qc-cyan) 12%, transparent), 0 18px 44px rgb(0 0 0 / 0.35);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--qc-neon-cyan) 12%, transparent), 0 18px 44px rgb(0 0 0 / 0.35);
 }
 
 .pixel-dialogue {
@@ -180,7 +191,7 @@ summary:focus-visible,
 
 .pixel-button:hover {
   transform: translate(-1px, -1px);
-  box-shadow: 4px 4px 0 color-mix(in srgb, var(--qc-cyan) 32%, transparent);
+  box-shadow: 4px 4px 0 color-mix(in srgb, var(--qc-neon-cyan) 32%, transparent);
 }
 
 .pixel-button:active {
