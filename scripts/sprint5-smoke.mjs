@@ -33,10 +33,10 @@ function runCli(pack, challenge) {
   return JSON.parse(child.stdout);
 }
 
-milestone("Linked-list portal/island scene renderer", () => {
-  assert(page.includes("Linked-list portal/island scene"), "linked-list scene renderer missing");
-  assert(page.includes("portal") && page.includes("island"), "portal/island visual language missing");
+milestone("Linked-list pointer scene renderer", () => {
+  assert(page.includes("Linked-list pointer scene"), "linked-list scene renderer missing");
   assert(page.includes("pointer movement / relinking visible"), "pointer movement copy missing");
+  assert(page.includes("ListNode proxies"), "linked-list replay instrumentation copy missing");
 });
 
 milestone("Reverse Linked List quest pack", () => {

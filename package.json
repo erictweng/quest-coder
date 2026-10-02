@@ -28,7 +28,8 @@
     "smoke:cyberpunk-campaign": "node scripts/cyberpunk-campaign-smoke.mjs",
     "smoke:cyberpunk-solve": "node scripts/cyberpunk-solve-smoke.mjs",
     "smoke:cyberpunk-assets": "node scripts/cyberpunk-assets-smoke.mjs",
-    "smoke:cyberpunk-bit": "node scripts/cyberpunk-bit-smoke.mjs"
+    "smoke:cyberpunk-bit": "node scripts/cyberpunk-bit-smoke.mjs",
+    "smoke:ui-redesign": "node scripts/ui-redesign-smoke.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "latest",
