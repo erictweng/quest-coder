@@ -10,8 +10,11 @@ Quest Coder is a focused coding RPG. The current product ships one campaign—**
 - The Old Bramblehorn boss asks for the complete `climbStairs` solution.
 - `Run basic` is feedback only.
 - Only a passing `Submit all` clears a stage, grants its configured reward, and unlocks the next stage.
-- Submit fixtures stay in `runner/packs/`; the browser receives only the public projection in `content/public/`.
+- `runner/packs/` is the single source of truth and the only place hidden submit tests live. `npm run build:packs` derives `content/server/` (for the Next.js server: no hidden tests) and `content/public/` (for the browser: additionally no solutions or hint text).
 - The Next.js application never executes or infers Python results. It proxies to an authenticated runner service and fails closed when that service is unavailable.
+- Running code requires a session. Each session gets a run count, one run at a time, and a share of runner time per minute.
+- Hints are free unless the pack sets `rewards.xp.hintAssistedMultiplier`; revealing the solution scales the XP by `solutionAssistedMultiplier`. A boss rematch advances the review schedule only when the review is due.
+- Clears, rewards, review schedules, opened hints and revealed solutions are decided and stored by the server. The browser only writes editor drafts and attempt history.
 
 ## Local development
 
@@ -28,20 +31,21 @@ npm run dev
 
 The same `QUEST_CODER_RUNNER_TOKEN` must be present in `.env.local` and the runner process.
 
-Local sign-in creates an opaque HttpOnly session and stores progress in `.data/quest-coder.sqlite`. If the session API is unavailable, the client retains a localStorage fallback rather than losing existing prototype progress.
+Sign-in creates an opaque HttpOnly session cookie and stores progress in `.data/quest-coder.sqlite`. There are no accounts: the cookie is the only key to a save file. Logging out hides the profile on that browser but keeps the save, and signing in again on the same browser resumes it. Clearing cookies or switching browsers starts a new save.
 
 ## Verification gate
 
 ```bash
-npm run typecheck
-npm run test:runner
-npm run build
+npm run lint          # tsc, including unused code
+npm run test:packs    # pack projections are in sync with runner/packs
+npm run test:unit     # progress store, rate limiter, client helpers
+npm run test:runner   # Python engine and trust boundary
 npx playwright install chromium
-npm run test:e2e
+npm run test:e2e      # builds, then drives the production build
 npm audit --omit=dev
 ```
 
-Playwright verifies the real journey: wrong submit, Run-without-unlock, Submit unlocks, all four stages, final campaign completion, hidden fixture redaction, session persistence, and reward totals.
+`npm run test:trusted-slice` runs all of the above except the audit.
 
 ## Deployment model
 

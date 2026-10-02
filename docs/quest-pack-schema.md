@@ -293,6 +293,8 @@ type RewardSpec = {
     questClear: number;
     bossClear: number;
     solutionAssistedMultiplier: number;
+    /** Share of XP kept after opening any hint. Optional; hints are free when it is absent. */
+    hintAssistedMultiplier?: number;
   };
   currency: {
     name: string;

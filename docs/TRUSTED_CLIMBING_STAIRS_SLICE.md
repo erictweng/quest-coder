@@ -34,7 +34,7 @@ There is no grading fallback. The browser imports `content/public/`; the runner 
 
 - Anonymous sign-in creates an opaque HttpOnly session cookie.
 - SQLite stores session hashes and progress JSON for the credential-free local/private mode.
-- localStorage remains a cache/import fallback for previous prototype progress.
+- The server copy is the only copy. localStorage holds just the last-used name and a signed-out flag; logging out keeps the save.
 - Hosted multi-instance production requires a durable managed repository implementation.
 
 ## Automated acceptance evidence

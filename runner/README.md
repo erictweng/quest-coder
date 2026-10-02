@@ -1,19 +1,17 @@
 # Quest Coder Runner
 
-Sprint 1 local CPython sandbox spike.
+CPython execution and grading for Quest Coder.
 
-Implemented responsibilities:
-
-- classify compile errors, runtime errors, wrong answers, passes, budget failures, loop guards, and off-end reads;
-- wrap list inputs to count reads;
-- run fast pass/fail first, then traced replay;
-- emit `timeline.v0`-shaped payloads consumed by the future Next.js replay UI;
-- collect line events, read events, tracked variables, budget usage, memory metadata, and final outcomes.
-
-Run smoke tests:
+- `service/app.py`: token-protected HTTP gateway. Validates the request, runs the CLI, and redacts hidden cases (inputs, expected values, and error text) from submit responses.
+- `quest_runner_cli.py`: the grader. Loads the pack from `packs/`, runs each case, compares results with expected values, and enforces a 5.5 s whole-submission deadline so a non-terminating submission is returned as `loop_guard` rather than a gateway timeout.
+- `case_worker.py`: one throwaway process per case. It receives the source and the case inputs only, so expected values and the verdict never share an interpreter with submitted code.
+- `quest_runner.py`: the engine shared by the grader and the worker (source checks, read counting, tracing, time and resource guards).
+- `packs/`: the single source of truth for packs and the only place hidden submit tests live. After editing a pack, run `npm run build:packs` to regenerate the Next.js projections in `content/`.
 
 ```bash
-python3 -m unittest runner.tests.test_smoke -v
+npm run test:runner
 ```
 
-Security note: this is intentionally not a public-safe sandbox. It is only for local Sprint 1 engine validation. Public execution still requires hardened isolation in Sprint 7.
+## Security note
+
+The source checks and resource limits are defense in depth, not an isolation boundary. Workers still share a filesystem and user with the grader, so a deployment that accepts untrusted code must run this service inside a locked-down container or microVM with no outbound network. See `docs/SECURITY_REVIEW.md`.

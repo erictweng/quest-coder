@@ -1,24 +1,40 @@
-"""Local CPython runner spike for Quest Coder Sprint 1.
+"""CPython execution and grading engine for Quest Coder.
 
-This is not a public-safe sandbox. It is a local engine spike that proves
-classification, read budgets, tracing, two-pass execution, and guard shape.
+Submitted code is executed by ``execute_case`` and graded by ``run_one_case``.
+With ``isolate=True`` (what the CLI uses) every case executes in a separate
+worker process that receives only the source and the case inputs, so expected
+values and the verdict never share an interpreter with submitted code.
+
+The source checks and resource limits here are defense in depth. They are not
+an OS isolation boundary; the runner service must still be deployed in a
+locked-down container or microVM.
 """
 
 from __future__ import annotations
 
 import ast
 import copy
+import json
 import math
 import resource
 import signal
+import subprocess
 import sys
 import time
 import traceback
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import FrameType
 from typing import Any, Callable, Dict, Iterable, List as PyList, Optional
 
 USER_FILENAME = "<quest-user>"
+WORKER_PATH = Path(__file__).resolve().parent / "case_worker.py"
+WORKER_KILL_GRACE_MS = 500
+MAX_WORKER_OUTPUT_BYTES = 2_000_000
+# Larger integers cannot be converted to text on CPython 3.11+ and are never a correct answer here.
+MAX_INT_BITS = 4096
+EXECUTION_ERROR_KINDS = {"compile_error", "runtime_error", "loop_guard", "off_end_read"}
+NOT_RUN_MESSAGE = "not run: the time limit was already used up by an earlier case"
 BLOCKED_SOURCE_NAMES = {"open", "eval", "exec", "compile", "input", "globals", "locals", "vars", "dir", "getattr", "setattr", "delattr", "__import__"}
 BLOCKED_ATTRIBUTE_ROOTS = {"os", "sys", "socket", "subprocess", "pathlib", "shutil"}
 TRACKED_NAMES = {
@@ -49,8 +65,12 @@ TRACKED_NAMES = {
 }
 
 
-class RunnerTimeout(Exception):
-    """Raised when the wall-time guard fires."""
+class RunnerTimeout(BaseException):
+    """Raised when the wall-time guard fires.
+
+    Derives from BaseException so a bare ``except Exception`` in submitted code
+    cannot swallow the guard.
+    """
 
 
 class DummySubscriptable:
@@ -141,14 +161,6 @@ class Recorder:
             "vars": capture_vars(frame) if frame else {},
         })
 
-    def outcome(self, status: str, expected: Any = None, actual: Any = None, message: str = "") -> None:
-        event: Dict[str, Any] = {"kind": "outcome", "status": status, "message": message}
-        if expected is not None:
-            event["expected"] = make_jsonable(expected)
-        if actual is not None:
-            event["actual"] = make_jsonable(actual)
-        self.add(event)
-
 
 class CountingList:
     """List wrapper that counts algorithm reads for budget enforcement."""
@@ -218,6 +230,11 @@ def make_jsonable(value: Any) -> Any:
         return value.raw()
     if isinstance(value, ListNode):
         return node_to_list(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        # JSON has no inf/nan; show them as text so the result stays valid JSON.
+        return repr(value)
+    if isinstance(value, int) and not isinstance(value, bool) and value.bit_length() > MAX_INT_BITS:
+        return f"<integer with {value.bit_length()} bits>"
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, (list, tuple)):
@@ -312,7 +329,7 @@ def validate_public_source(source: str) -> None:
 
 def apply_resource_limits(timeout_ms: int) -> None:
     """Best-effort per-process CPU and memory guard for local CPython."""
-    cpu_seconds = max(30, math.ceil(timeout_ms / 1000) + 10)
+    cpu_seconds = math.ceil(timeout_ms / 1000) + 2
     try:
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
     except (ValueError, OSError):
@@ -407,29 +424,28 @@ def replay_input_from_test(test: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def run_one_case(
+def execute_case(
     source: str,
-    test: Dict[str, Any],
+    inputs: Dict[str, Any],
     *,
     entrypoint: str,
     trace: bool,
-    budget_limit: Optional[int],
     timeout_ms: int,
     max_events: int,
 ) -> Dict[str, Any]:
+    """Execute submitted code on one input and report what it did.
+
+    This function never sees the expected value: grading happens in the caller.
+    """
     recorder = Recorder(enabled=trace, max_events=max_events)
     started = time.time()
-    expected = test.get("expected")
     actual: Any = None
-    status = "internal_error"
     error: Optional[Dict[str, Any]] = None
 
     try:
-        apply_resource_limits(timeout_ms)
         namespace = build_namespace(source)
         fn = resolve_entrypoint(namespace, entrypoint)
-        inputs = wrap_inputs(test.get("input", {}), recorder)
-        arg_values = list(inputs.values())
+        arg_values = list(wrap_inputs(inputs, recorder).values())
 
         def invoke() -> Any:
             if trace:
@@ -440,58 +456,172 @@ def run_one_case(
                 if trace:
                     sys.settrace(None)
 
-        actual = guarded_call(invoke, timeout_ms)
-        actual_json = make_jsonable(actual)
-        if actual_json != expected:
-            status = "wrong_answer"
-        elif budget_limit is not None and recorder.read_count > budget_limit:
-            status = "over_budget"
-        else:
-            status = "passed"
+        actual = make_jsonable(guarded_call(invoke, timeout_ms))
     except SyntaxError as exc:
-        status = "compile_error"
-        error = {"kind": status, "message": exc.msg, "line": exc.lineno}
+        error = {"kind": "compile_error", "message": exc.msg, "line": exc.lineno}
     except RunnerTimeout as exc:
-        status = "loop_guard"
-        error = {"kind": status, "message": str(exc)}
+        error = {"kind": "loop_guard", "message": str(exc)}
     except Exception as exc:  # noqa: BLE001 - runner must classify arbitrary user errors.
         if recorder.off_end_read is not None or isinstance(exc, IndexError):
-            status = "off_end_read"
-            error = {"kind": status, "message": str(exc), "line": recorder.off_end_read.get("line") if recorder.off_end_read else None}
+            error = {"kind": "off_end_read", "message": str(exc), "line": recorder.off_end_read.get("line") if recorder.off_end_read else None}
         else:
-            status = "runtime_error"
             tb = traceback.extract_tb(exc.__traceback__)
             user_line = next((entry.lineno for entry in reversed(tb) if entry.filename == USER_FILENAME), None)
-            error = {"kind": status, "message": f"{type(exc).__name__}: {exc}", "line": user_line}
+            error = {"kind": "runtime_error", "message": f"{type(exc).__name__}: {exc}", "line": user_line}
     finally:
         sys.settrace(None)
 
+    return {
+        "actual": actual,
+        "error": error,
+        "readCount": recorder.read_count,
+        "events": recorder.events,
+        "truncated": recorder.truncated,
+        "durationMs": int((time.time() - started) * 1000),
+        "memoryKb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+    }
+
+
+def _failed_execution(kind: str, message: str, duration_ms: int = 0) -> Dict[str, Any]:
+    return {"actual": None, "error": {"kind": kind, "message": message}, "readCount": 0, "events": [], "truncated": False, "durationMs": duration_ms, "memoryKb": 0}
+
+
+def execute_case_isolated(
+    source: str,
+    inputs: Dict[str, Any],
+    *,
+    entrypoint: str,
+    trace: bool,
+    timeout_ms: int,
+    max_events: int,
+) -> Dict[str, Any]:
+    """Run ``execute_case`` in a throwaway worker process.
+
+    The worker gets the source and inputs only. It is killed if it outlives the
+    in-process guard, and its output is treated as untrusted data.
+    """
+    request = json.dumps({"source": source, "inputs": inputs, "entrypoint": entrypoint, "trace": trace, "timeoutMs": timeout_ms, "maxEvents": max_events})
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(WORKER_PATH)],
+            input=request,
+            text=True,
+            capture_output=True,
+            timeout=(timeout_ms + WORKER_KILL_GRACE_MS) / 1000,
+            env={"PATH": "/usr/bin:/bin", "PYTHONSAFEPATH": "1", "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+    except subprocess.TimeoutExpired:
+        return _failed_execution("loop_guard", "execution exceeded wall-time guard", int((time.time() - started) * 1000))
     duration_ms = int((time.time() - started) * 1000)
-    recorder.outcome(status, expected=expected, actual=actual, message=error["message"] if error else status)
-    memory_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if proc.returncode != 0:
+        return _failed_execution("runtime_error", "execution stopped: the program exceeded its memory or CPU limit", duration_ms)
+    if len(proc.stdout) > MAX_WORKER_OUTPUT_BYTES:
+        return _failed_execution("runtime_error", "execution produced too much output", duration_ms)
+    try:
+        return _sanitize_execution(json.loads(proc.stdout, parse_constant=_reject_constant))
+    except (ValueError, TypeError, KeyError):
+        return _failed_execution("runtime_error", "execution produced an unreadable result", duration_ms)
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"non-standard JSON constant {name}")
+
+
+def _sanitize_execution(raw: Any) -> Dict[str, Any]:
+    """Coerce worker output into the execute_case shape without trusting it."""
+    if not isinstance(raw, dict):
+        raise ValueError("worker result must be an object")
+    error = raw.get("error")
+    if error is not None:
+        if not isinstance(error, dict):
+            raise ValueError("worker error must be an object")
+        kind = error.get("kind")
+        line = error.get("line")
+        error = {
+            "kind": kind if kind in EXECUTION_ERROR_KINDS else "runtime_error",
+            "message": str(error.get("message", ""))[:2000],
+            "line": line if isinstance(line, int) else None,
+        }
+    events = raw.get("events")
+    return {
+        "actual": raw.get("actual"),
+        "error": error,
+        "readCount": int(raw.get("readCount", 0)),
+        "events": [event for event in events if isinstance(event, dict)] if isinstance(events, list) else [],
+        "truncated": bool(raw.get("truncated")),
+        "durationMs": int(raw.get("durationMs", 0)),
+        "memoryKb": int(raw.get("memoryKb", 0)),
+    }
+
+
+def run_one_case(
+    source: str,
+    test: Dict[str, Any],
+    *,
+    entrypoint: str,
+    trace: bool,
+    budget_limit: Optional[int],
+    timeout_ms: int,
+    max_events: int,
+    isolate: bool = False,
+    skip_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Execute one case and grade the outcome against the expected value."""
+    expected = test.get("expected")
+    inputs = test.get("input", {})
+    if skip_reason is not None:
+        execution = _failed_execution("loop_guard", skip_reason)
+    else:
+        execute = execute_case_isolated if isolate else execute_case
+        execution = execute(source, inputs, entrypoint=entrypoint, trace=trace, timeout_ms=timeout_ms, max_events=max_events)
+
+    error = execution["error"]
+    actual = execution["actual"]
+    read_count = execution["readCount"]
+    over_budget = budget_limit is not None and read_count > budget_limit
+    if error is not None:
+        status = error["kind"]
+    elif actual != make_jsonable(expected):
+        status = "wrong_answer"
+    elif over_budget:
+        status = "over_budget"
+    else:
+        status = "passed"
+
+    events = execution["events"][:max_events]
+    if trace and len(events) < max_events:
+        outcome: Dict[str, Any] = {"kind": "outcome", "status": status, "message": error["message"] if error else status}
+        if expected is not None:
+            outcome["expected"] = make_jsonable(expected)
+        if actual is not None:
+            outcome["actual"] = actual
+        outcome["i"] = outcome["t"] = len(events)
+        events.append(outcome)
+
     return {
         "caseId": test.get("id", "case"),
         "status": status,
         "passed": status == "passed",
         "expected": make_jsonable(expected),
-        "actual": make_jsonable(actual),
+        "actual": actual,
         "error": error,
         "budget": {
             "enabled": budget_limit is not None,
             "limit": budget_limit,
-            "used": recorder.read_count,
+            "used": read_count,
             "unit": "array_read",
-            "exceeded": budget_limit is not None and recorder.read_count > budget_limit,
+            "exceeded": over_budget,
         },
         "summary": {
-            "durationMs": duration_ms,
-            "eventCount": len(recorder.events),
-            "truncated": recorder.truncated,
-            "memoryKb": memory_kb,
+            "durationMs": execution["durationMs"],
+            "eventCount": len(events),
+            "truncated": execution["truncated"] or len(events) >= max_events,
+            "memoryKb": execution["memoryKb"],
         },
         "input": replay_input_from_test(test),
-        "arguments": make_jsonable(test.get("input", {})),
-        "events": recorder.events,
+        "arguments": make_jsonable(inputs),
+        "events": events,
     }
 
 
@@ -517,39 +647,58 @@ def run_submission(
     max_events: int = 3000,
     mode: str = "submit",
     replay_test: Optional[Dict[str, Any]] = None,
+    isolate: bool = False,
+    total_budget_ms: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Run source against tests, then replay one case with tracing enabled."""
+    """Run source against tests, then replay one case with tracing enabled.
+
+    ``total_budget_ms`` bounds the whole submission, so a caller with its own
+    deadline always gets a classified result back. Once a case hits the loop
+    guard the remaining fast cases are reported as not run instead of each
+    burning a full time limit.
+    """
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    fast_cases = [
-        run_one_case(
+    deadline = None if total_budget_ms is None else time.monotonic() + total_budget_ms / 1000
+
+    def case_timeout_ms() -> Optional[int]:
+        """Time limit for the next case, or None when the total budget is spent."""
+        if deadline is None:
+            return timeout_ms
+        remaining_ms = int((deadline - time.monotonic()) * 1000) - WORKER_KILL_GRACE_MS
+        return min(timeout_ms, remaining_ms) if remaining_ms >= 50 else None
+
+    def run_case(test: Dict[str, Any], trace: bool, skip_reason: Optional[str] = None) -> Dict[str, Any]:
+        limit = case_timeout_ms()
+        if limit is None and skip_reason is None:
+            skip_reason = NOT_RUN_MESSAGE
+        return run_one_case(
             source,
             test,
             entrypoint=entrypoint,
-            trace=False,
+            trace=trace,
             budget_limit=budget_limit,
-            timeout_ms=timeout_ms,
+            timeout_ms=limit or timeout_ms,
             max_events=max_events,
-        )
-        for test in tests
-    ]
-    replay_source = replay_test or (tests[choose_replay_case(fast_cases, tests)] if tests else None)
-    replay_index = choose_replay_case(fast_cases, tests, replay_source.get("id") if replay_source else None)
-    replay_case = None
-    if replay_source is not None:
-        replay_case = run_one_case(
-            source,
-            replay_source,
-            entrypoint=entrypoint,
-            trace=True,
-            budget_limit=budget_limit,
-            timeout_ms=timeout_ms,
-            max_events=max_events,
+            isolate=isolate,
+            skip_reason=skip_reason,
         )
 
-    top_status = "passed" if fast_cases and all(case["status"] == "passed" for case in fast_cases) else (fast_cases[0]["status"] if fast_cases else "internal_error")
+    fast_cases: PyList[Dict[str, Any]] = []
+    guard_tripped = False
+    for test in tests:
+        case = run_case(test, trace=False, skip_reason=NOT_RUN_MESSAGE if guard_tripped else None)
+        guard_tripped = guard_tripped or case["status"] == "loop_guard"
+        fast_cases.append(case)
+
+    replay_source = replay_test or (tests[choose_replay_case(fast_cases, tests)] if tests else None)
+    replay_index = choose_replay_case(fast_cases, tests, replay_source.get("id") if replay_source else None)
+    replay_case = run_case(replay_source, trace=True) if replay_source is not None else None
+
     first_bad = next((case for case in fast_cases if case["status"] != "passed"), None)
     if first_bad:
         top_status = first_bad["status"]
+    else:
+        top_status = "passed" if fast_cases else "internal_error"
 
     return {
         "schemaVersion": "timeline.v0",
@@ -566,4 +715,4 @@ def run_submission(
 
 
 def default_rotated_budget(n: int) -> int:
-    return 4 * math.ceil(math.log2(n + 1)) + 8
+    return 4 * math.ceil(math.log2(n + 1)) + 16
