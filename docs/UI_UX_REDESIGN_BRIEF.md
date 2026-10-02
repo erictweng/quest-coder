@@ -106,17 +106,18 @@ The product should feel like a retro pixel RPG layered over a focused coding int
 
 ### Art direction
 
-Design target: **Undertale-like, but happier**, now specialized as **Sky-Island Academy**.
+Design target: **Cyberpunk Bit** — the midpoint between **Pac-Man** maze clarity and **Undertale** encounter framing.
 
-Sky-Island Academy means Quest Coder should feel like a bright pixel-fantasy coding academy in the clouds: floating campaign islands, wood-sign cards, cloud paths, lantern quest nodes, and sky-gate bosses. This is an original adaptation of the reference mood; do not copy its assets, characters, buildings, or exact compositions.
+Cyberpunk Bit means Quest Coder should feel like a dark neon arcade-coding terminal: maze districts, pellet/progress nodes, power-node hints, glitch patrol/failing-test pressure, firewall bosses, compact dialogue panels, and a professional split-pane code editor. This is an original adaptation of broad design principles; do not copy Pac-Man or Undertale assets, characters, fonts, UI, sound effects, exact colors, or layouts.
 
-- **Style:** retro, pixel-art, bit-character, game-console UI.
-- **Mood:** playful RPG quest terminal, cozy and encouraging instead of ominous.
-- **Reference energy:** borrow Undertale's simple pixel framing, dialogue boxes, encounter/battle structure, and character-driven flavor, but brighten the palette and tone.
-- **Characters:** small pixel companions / avatars / bosses can represent topics, campaign worlds, review reminders, and victory states.
-- **UI chrome:** panels should feel like pixel game windows or RPG dialogue boxes while preserving the split-pane coding workflow.
-- **Animation:** subtle sprite idle states, cursor blinks, reward popups, boss defeat flashes, and map-node unlocks. Avoid constant motion that distracts from solving.
-- **Detailed spec:** see `docs/UI_UX_FLOW_AND_AESTHETIC.md`.
+- **Style:** retro, pixel-art, bit-character, cyberpunk arcade terminal UI.
+- **Mood:** energetic, readable, slightly weird, encouraging, and high-contrast instead of fantasy or horror.
+- **Pac-Man energy:** maze readability, pellet rhythm, power nodes, score clarity, cute pressure from chasers.
+- **Undertale energy:** focused encounter screen, dark bordered panels, short character dialogue, clear choices, optional battle/animation space.
+- **Characters:** small pixel operator / glitch patrols / firewall bosses can represent topics, review reminders, failing tests, and victory states.
+- **UI chrome:** panels should feel like neon arcade terminals or encounter boxes while preserving the split-pane coding workflow.
+- **Animation:** subtle terminal glows, packet traces, reward bursts, firewall clear flashes, and node unlocks. Avoid constant motion that distracts from solving.
+- **Detailed spec:** see `docs/UI_UX_FLOW_AND_AESTHETIC.md` and `docs/CYBERPUNK_BIT_AESTHETIC.md`.
 
 ### Visual tokens
 
