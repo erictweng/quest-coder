@@ -1,65 +1,55 @@
 # Quest Coder
 
-Quest Coder turns algorithm practice into RPG quest packs: mini-quests, boss fights, visible code execution, replayable failures, spaced review, rewards, and optional social polish.
+Quest Coder is a focused coding RPG. The current product ships one campaign—**Climbing Stairs / 1-DP**—as a four-stage learning path with a compiler-first workspace, Quest Notebook, basic checks, authoritative submits, replay animation, rewards, and durable anonymous progress.
 
-## Current status
+## Current trusted slice
 
-The named MVP sprint plan is complete through Sprint 8. Sprint 9 prepares the public beta launch path.
+- Quest 1 teaches the recurrence.
+- Quest 2 builds the bottom-up DP table.
+- Quest 3 reduces state to two values.
+- The Old Bramblehorn boss asks for the complete `climbStairs` solution.
+- `Run basic` is feedback only.
+- Only a passing `Submit all` clears a stage, grants its configured reward, and unlocks the next stage.
+- Submit fixtures stay in `runner/packs/`; the browser receives only the public projection in `content/public/`.
+- The Next.js application never executes or infers Python results. It proxies to an authenticated runner service and fails closed when that service is unavailable.
 
-Shipped core loop:
+## Local development
 
-- Next.js app shell with local profile sign-in and saved progress.
-- Python runner bridge with read budgets and replay timelines.
-- Quest-pack JSON pipeline with validation.
-- Five practice packs across binary search and linked lists.
-- Review scheduler, per-topic stats, rewards, and optional friend shell.
-- Public-hardening profile with rate limits, queue metadata, no-import/no-open source validation, and resource guards.
-
-## Development
+Requires Node 24+ and Python 3.11+.
 
 ```bash
-npm install
-npm run typecheck
-npm run build
+npm ci
+cp .env.example .env.local
+# terminal 1
+QUEST_CODER_RUNNER_TOKEN=replace-with-a-long-random-value npm run runner:service
+# terminal 2
 npm run dev
 ```
+
+The same `QUEST_CODER_RUNNER_TOKEN` must be present in `.env.local` and the runner process.
+
+Local sign-in creates an opaque HttpOnly session and stores progress in `.data/quest-coder.sqlite`. If the session API is unavailable, the client retains a localStorage fallback rather than losing existing prototype progress.
 
 ## Verification gate
 
 ```bash
-npm run test:runner
 npm run typecheck
+npm run test:runner
 npm run build
-npm run smoke:sprint2
-npm run smoke:sprint3
-npm run smoke:sprint4
-npm run smoke:sprint5
-npm run smoke:sprint6
-npm run smoke:sprint7
-npm run smoke:sprint8
-npm run smoke:sprint9
+npx playwright install chromium
+npm run test:e2e
+npm audit --omit=dev
 ```
 
-## Deployment notes
+Playwright verifies the real journey: wrong submit, Run-without-unlock, Submit unlocks, all four stages, final campaign completion, hidden fixture redaction, session persistence, and reward totals.
 
-- `vercel.json` is configured for the Next.js app and API routes.
-- `/api/health` exposes launch-readiness metadata, including which Python interpreter the runner resolved.
-- `/api/run` needs a Python 3 interpreter. It is auto-detected (`python3`, `python`, Homebrew/system paths); set `QUEST_CODER_PYTHON=/path/to/python3` to override, for example when the dev server starts with a minimal `PATH`.
-- `npm run smoke:bugfix-regressions` covers runner command resolution, result-drawer case rows, attempt history, and editor auto-indent.
-- `NEXT_PUBLIC_SITE_URL` should be set to the deployed URL.
-- `NEXT_PUBLIC_ALLOW_INDEXING` defaults to blocked indexing; set to `true` only when ready for discovery.
-- The local child-process Python runner is acceptable for a private beta smoke, but production launch should replace it with the container/microVM boundary described in `docs/SECURITY_REVIEW.md`.
+## Deployment model
 
-## Source docs
+- Deploy Next.js separately from the Python runner.
+- Set server-only `QUEST_CODER_RUNNER_URL` and `QUEST_CODER_RUNNER_TOKEN` on the Next.js deployment.
+- Deploy `runner/service/Dockerfile` behind TLS on an isolated runner host.
+- Apply outbound-deny firewalling and provider-level CPU, memory, PID, filesystem, and timeout controls to the runner container/microVM.
+- Never expose the runner token through `NEXT_PUBLIC_*` variables.
+- Do not deploy durable SQLite on an ephemeral serverless filesystem; mount a durable volume or replace the repository with a managed database before multi-instance hosting.
 
-- Sprint plan: `docs/SPRINTS_AND_MILESTONES.md`
-- Deployment guide: `docs/DEPLOYMENT.md`
-- Launch checklist: `docs/PUBLIC_LAUNCH_CHECKLIST.md`
-- Security review: `docs/SECURITY_REVIEW.md`
-- Timeline retention: `docs/TIMELINE_RETENTION_POLICY.md`
-- Decisions: `DECISIONS.md`
-- Architecture: `ARCHITECTURE.md`
-
-## Discord thread
-
-Project thread: `1555029357129506887`
+See `docs/DEPLOYMENT.md`, `docs/SECURITY_REVIEW.md`, and `docs/TRUSTED_CLIMBING_STAIRS_SLICE.md`.

@@ -1,0 +1,7 @@
+FROM python:3.11.14-slim-bookworm
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONSAFEPATH=1
+WORKDIR /app
+COPY runner /app/runner
+USER 65532:65532
+EXPOSE 8787
+CMD ["python3", "runner/service/app.py"]

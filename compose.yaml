@@ -1,0 +1,26 @@
+services:
+  runner:
+    build:
+      context: .
+      dockerfile: runner/service/Dockerfile
+    environment:
+      QUEST_CODER_RUNNER_TOKEN: ${QUEST_CODER_RUNNER_TOKEN:?set QUEST_CODER_RUNNER_TOKEN}
+      QUEST_CODER_RUNNER_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8787:8787"
+    networks:
+      - runner_net
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+
+networks:
+  runner_net:
+    internal: true

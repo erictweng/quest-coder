@@ -2,13 +2,16 @@
   "name": "quest-coder",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
+  "packageManager": "npm@11.18.0",
+  "engines": { "node": ">=24 <27" },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test:runner": "python3 -m unittest runner.tests.test_smoke -v",
+    "test:runner": "python3 -m unittest discover -s runner/tests -p 'test_*.py' -v",
     "smoke:sprint2": "node scripts/sprint2-smoke.mjs",
     "smoke:sprint3": "node scripts/sprint3-smoke.mjs",
     "smoke:sprint4": "node scripts/sprint4-smoke.mjs",
@@ -32,19 +35,24 @@
     "smoke:ui-redesign": "node scripts/ui-redesign-smoke.mjs",
     "smoke:climbing-stairs": "node scripts/climbing-stairs-smoke.mjs",
     "smoke:one-question-workspace": "node scripts/one-question-workspace-smoke.mjs",
-    "smoke:bugfix-regressions": "node scripts/bugfix-regressions-smoke.mjs"
+    "smoke:bugfix-regressions": "node scripts/bugfix-regressions-smoke.mjs",
+    "runner:service": "python3 runner/service/app.py",
+    "test:e2e": "playwright test",
+    "test:smoke": "npm run smoke:bugfix-regressions && npm run smoke:climbing-stairs && npm run smoke:one-question-workspace && npm run smoke:ui-redesign && npm run smoke:cyberpunk-bit",
+    "test:trusted-slice": "npm run typecheck && npm run test:runner && npm run test:smoke && npm run build && npm run test:e2e"
   },
   "dependencies": {
-    "@tailwindcss/postcss": "latest",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "tailwindcss": "latest"
+    "@tailwindcss/postcss": "4.3.3",
+    "next": "16.3.8",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwindcss": "4.3.3"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "typescript": "latest"
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2"
   }
 }

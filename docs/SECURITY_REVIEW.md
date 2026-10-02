@@ -1,30 +1,50 @@
-# Sprint 7 Security Review
+# Security Review — Trusted Climbing Stairs Slice
 
-Quest Coder is still a local MVP, but Sprint 7 defines and enforces the first public-readiness safety envelope.
+## Fixed boundaries
 
-## Public-hardening-v0 controls
+- `/api/run` is now a validating HTTP proxy. It does not spawn Python or infer correctness.
+- `lib/climbing-stairs-fallback.ts` is no longer reachable from grading. Runner failure produces `503` rather than a synthetic pass/fail result.
+- Only the active pack and four challenge IDs are accepted. Unknown fields, modes, packs, challenge IDs, and traversal strings are rejected.
+- The runner service requires a bearer token and caps request, execution time, stdout, and response size.
+- The CLI resolves packs from fixed `runner/packs/` storage; callers cannot provide paths, tests, entrypoints, commands, or image names.
+- Hidden submit fixtures are excluded from `content/public/`, client imports, and the pack API. Submit responses redact inputs, expected values, actual values, and private case IDs.
+- Anonymous sessions use opaque 256-bit tokens in HttpOnly, SameSite=Lax cookies; only token hashes are stored.
 
-- **Container/microVM strategy:** production should run `runner/quest_runner_cli.py` inside a per-run Firecracker/microVM or equivalent short-lived container with this same stdin/stdout JSON contract. The app bridge already treats the runner as an isolated child process, so the process boundary can be swapped for a container launcher without changing pack content.
-- **No network:** public source validation rejects imports and network-related names such as `socket`, `subprocess`, `os`, and `sys`. The runner namespace does not expose `__import__`.
-- **Read-only filesystem:** public source validation rejects `open`, `compile`, `eval`, `exec`, and dunder access. The runner namespace does not expose file APIs.
-- **CPU/time limits:** the API kills the runner bridge after 7s; the Python runner also applies a per-case wall-time guard and best-effort `RLIMIT_CPU`.
-- **Memory limits:** the Python runner applies best-effort `RLIMIT_AS` at 256MB.
-- **Abuse protection:** `/api/run` limits source size, applies per-client fixed-window rate limits, and runs through a small concurrency queue.
-- **Queue visibility:** API responses include `{ activeRuns, queuedRuns, maxConcurrentRuns }`, and the app shows queue status.
-- **Timeline retention:** replays remain capped at 3,000 events. The UI stores only compressed run metadata and capped replay pointers in localStorage for the MVP.
+## Defense in depth
 
-## Documented security checks
+The Python engine still rejects imports, file APIs, dynamic execution, dunder access, and common network/process names. It applies per-case time guards plus best-effort CPU/address-space limits. Those checks reduce exposure but are not a substitute for OS isolation.
 
-- Import attempt is blocked before execution.
-- File-open attempt is blocked before execution.
-- Oversized source is rejected before runner spawn.
-- Rate-limit code path returns HTTP 429 with `Retry-After`.
-- Runner still passes reference solutions under the hardened namespace.
-- Full Sprint 2–7 smoke gate passes after hardening.
+## Required production isolation
 
-## Known limits before real public launch
+`runner/service/Dockerfile` and `compose.yaml` provide a non-root, read-only, capability-dropped deployment baseline. Public hosting must also provide:
 
-- The local child-process runner is not a true isolation boundary by itself.
-- Production must replace the child process with the container/microVM launcher described above.
-- Rate limiting is in-memory and should move to Redis or provider edge limits before multi-instance deploy.
-- User/profile storage is localStorage MVP state, not production identity.
+- a dedicated runner host or microVM/container platform;
+- outbound-deny firewall rules for execution workloads;
+- TLS and source allowlisting between app and runner;
+- provider-enforced CPU, memory, PID, and wall-time limits;
+- bounded queueing and distributed rate limiting;
+- token rotation and secret-backed configuration;
+- no cloud credentials mounted into the execution container.
+
+The local Python service is for development and private verification. It is not itself a hostile-code isolation boundary when run directly on a workstation.
+
+## Verified security behavior
+
+Automated tests prove:
+
+- `return 999` fails through real execution;
+- reference solutions pass server-owned submit suites;
+- traversal and unknown fields are rejected;
+- submit details are redacted;
+- the browser receives no `tests.submit` projection;
+- an unavailable/misconfigured runner fails closed;
+- progress is isolated behind an HttpOnly anonymous session.
+
+## Remaining launch conditions
+
+Before unrestricted public traffic:
+
+1. Deploy and verify the runner in the hardened production container/microVM environment.
+2. Replace local SQLite or mount a durable single-instance volume.
+3. Add shared rate limiting/queueing for horizontally scaled deployments.
+4. Run external abuse tests for network, filesystem, fork/PID, memory, CPU, timeout, oversized output, and cancellation behavior.

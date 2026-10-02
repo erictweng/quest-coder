@@ -3,7 +3,8 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const root = process.cwd();
-const pack = JSON.parse(readFileSync(`${root}/content/packs/forest-of-patience-climbing-stairs.json`, "utf8"));
+const pack = JSON.parse(readFileSync(`${root}/runner/packs/forest-of-patience-climbing-stairs.json`, "utf8"));
+const publicPack = JSON.parse(readFileSync(`${root}/content/public/forest-of-patience-climbing-stairs.json`, "utf8"));
 const page = readFileSync(`${root}/app/page.tsx`, "utf8");
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
@@ -12,7 +13,7 @@ function runReference(challenge) {
   const child = spawnSync("python3", ["runner/quest_runner_cli.py"], {
     cwd: root,
     encoding: "utf8",
-    input: JSON.stringify({ source: challenge.solution.code, packPath: `content/packs/${pack.slug}.json`, challengeId: challenge.id }),
+    input: JSON.stringify({ source: challenge.solution.code, packSlug: pack.slug, challengeId: challenge.id, mode: "submit" }),
     maxBuffer: 20 * 1024 * 1024
   });
   assert(child.status === 0, `reference run failed for ${challenge.id}\nSTDOUT:\n${child.stdout}\nSTDERR:\n${child.stderr}`);
@@ -77,12 +78,19 @@ milestone("One-question schema splits run, submit, and replay tests", () => {
   }
 });
 
+milestone("Public pack excludes hidden submit fixtures", () => {
+  for (const challenge of [...publicPack.quests, publicPack.boss]) {
+    assert(Array.isArray(challenge.tests.run), `${challenge.id} public run suite missing`);
+    assert(!("submit" in challenge.tests) && !("fixed" in challenge.tests), `${challenge.id} leaks hidden tests`);
+  }
+});
+
 milestone("Reference solutions pass all submit tests", () => {
   for (const challenge of [...pack.quests, pack.boss]) runReference(challenge);
 });
 
 milestone("Quest Coder app only lists the Climbing Stairs pack", () => {
-  assert(page.includes("forest-of-patience-climbing-stairs.json"), "app import missing");
+  assert(page.includes("content/public/forest-of-patience-climbing-stairs.json"), "public app import missing");
   assert(page.includes("const PACKS = [climbingStairsPack]"), "PACKS should contain only climbing stairs");
   for (const retiredImport of ["timequake-search-rotated-array.json", "reverse-linked-list.json", "merge-two-sorted-lists.json", "linked-list-cycle.json", "plain-binary-search.json"]) {
     assert(!page.includes(retiredImport), `app still imports retired pack ${retiredImport}`);

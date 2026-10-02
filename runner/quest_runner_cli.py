@@ -6,17 +6,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ROOT = Path(__file__).resolve().parents[1]
+PACKS_ROOT = ROOT / "runner" / "packs"
+sys.path.insert(0, str(ROOT))
 
 from runner.quest_runner import run_submission
 
-
-def default_tests() -> list[dict[str, Any]]:
-    return [
-        {"id": "small-found", "input": {"nums": [4, 5, 6, 7, 0, 1, 2], "target": 0}, "expected": 4},
-        {"id": "small-missing", "input": {"nums": [4, 5, 6, 7, 0, 1, 2], "target": 3}, "expected": -1},
-        {"id": "large-found", "input": {"nums": list(range(96, 256)) + list(range(96)), "target": 95}, "expected": 255},
-    ]
+ALLOWED_FIELDS = {"source", "packSlug", "challengeId", "mode"}
+ALLOWED_PACKS = {"forest-of-patience-climbing-stairs"}
+ALLOWED_MODES = {"run", "submit"}
 
 
 def default_rotated_budget(n: int) -> int:
@@ -37,68 +35,61 @@ def challenge_from_pack(pack: dict[str, Any], challenge_id: str) -> dict[str, An
     for challenge in [*pack.get("quests", []), pack.get("boss")]:
         if isinstance(challenge, dict) and challenge.get("id") == challenge_id:
             return challenge
-    raise ValueError(f"challenge not found: {challenge_id}")
+    raise ValueError("unknown challenge")
 
 
-def load_pack_challenge(pack_path: str, challenge_id: str, mode: str = "submit") -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
-    pack = json.loads(Path(pack_path).read_text())
+def load_pack_challenge(pack_slug: str, challenge_id: str, mode: str) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
+    if pack_slug not in ALLOWED_PACKS:
+        raise ValueError("unknown pack")
+    pack = json.loads((PACKS_ROOT / f"{pack_slug}.json").read_text())
     challenge = challenge_from_pack(pack, challenge_id)
     test_spec = challenge.get("tests", {})
-    suite_name = "submit" if mode == "submit" else "run"
-    tests = list(test_spec.get(suite_name) or test_spec.get("fixed", []))
+    tests = list(test_spec.get(mode) or [])
     if not tests:
-        raise ValueError(f"challenge has no {suite_name} tests: {challenge_id}")
-    replay_case_id = test_spec.get("replayCaseId") or next(iter(test_spec.get("replayCaseIds", [])), None)
-    all_tests = list(test_spec.get("submit") or test_spec.get("fixed", []))
+        raise ValueError(f"challenge has no {mode} tests")
+    replay_case_id = test_spec.get("replayCaseId")
+    all_tests = list(test_spec.get("submit") or tests)
     replay_test = next((test for test in all_tests if test.get("id") == replay_case_id), None)
     return pack, challenge, tests, replay_test
 
 
+def parse_payload(payload: Any) -> tuple[str, str, str, str]:
+    if not isinstance(payload, dict):
+        raise ValueError("request must be an object")
+    unknown = set(payload) - ALLOWED_FIELDS
+    if unknown:
+        raise ValueError(f"unknown field: {sorted(unknown)[0]}")
+    if set(payload) != ALLOWED_FIELDS:
+        raise ValueError("source, packSlug, challengeId, and mode are required")
+    source = payload["source"]
+    pack_slug = payload["packSlug"]
+    challenge_id = payload["challengeId"]
+    mode = payload["mode"]
+    if not isinstance(source, str) or not source.strip(): raise ValueError("source must be a non-empty string")
+    if pack_slug not in ALLOWED_PACKS: raise ValueError("unknown pack")
+    if not isinstance(challenge_id, str): raise ValueError("unknown challenge")
+    if mode not in ALLOWED_MODES: raise ValueError("mode must be run or submit")
+    return source, pack_slug, challenge_id, mode
+
+
 def main() -> int:
     try:
-        payload = json.load(sys.stdin)
-        source = payload["source"]
-        if not isinstance(source, str) or not source.strip():
-            raise ValueError("source must be a non-empty string")
-
-        if "packPath" in payload or "challengeId" in payload:
-            mode = str(payload.get("mode", "submit"))
-            if mode not in {"run", "submit"}:
-                mode = "run"
-            pack, challenge, tests, replay_test = load_pack_challenge(
-                str(payload.get("packPath", "content/packs/forest-of-patience-climbing-stairs.json")),
-                str(payload.get("challengeId", "boss-old-bramblehorn")),
-                mode,
-            )
-            timeout_ms = int(pack.get("runtime", {}).get("timeLimitMs", 2000))
-            max_events = int(pack.get("runtime", {}).get("timelineEventCap", 3000))
-            quest_id = challenge["id"]
-            entrypoint = challenge["entrypoint"]
-            limit = budget_limit(challenge, tests)
-        else:
-            tests = default_tests()
-            replay_test = tests[0]
-            mode = "submit"
-            timeout_ms = 2000
-            max_events = 3000
-            quest_id = "timequake-search-rotated-array"
-            entrypoint = "Solution().search"
-            limit = default_rotated_budget(256)
-
+        source, pack_slug, challenge_id, mode = parse_payload(json.load(sys.stdin))
+        pack, challenge, tests, replay_test = load_pack_challenge(pack_slug, challenge_id, mode)
         result = run_submission(
             source,
             tests,
-            quest_id=quest_id,
-            entrypoint=entrypoint,
-            budget_limit=limit,
-            timeout_ms=timeout_ms,
-            max_events=max_events,
+            quest_id=challenge["id"],
+            entrypoint=challenge["entrypoint"],
+            budget_limit=budget_limit(challenge, tests),
+            timeout_ms=int(pack.get("runtime", {}).get("timeLimitMs", 2000)),
+            max_events=int(pack.get("runtime", {}).get("timelineEventCap", 3000)),
             mode=mode,
             replay_test=replay_test,
         )
         print(json.dumps(result))
         return 0
-    except Exception as exc:  # noqa: BLE001 - command-line bridge should emit safe failure JSON.
+    except Exception as exc:
         print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}), file=sys.stderr)
         return 1
 

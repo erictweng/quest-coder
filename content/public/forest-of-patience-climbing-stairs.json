@@ -1,0 +1,565 @@
+{
+  "schemaVersion": "quest-pack.v0",
+  "id": "forest-of-patience-climbing-stairs",
+  "slug": "forest-of-patience-climbing-stairs",
+  "title": "1-DP: Forest of Patience Dojo",
+  "status": "validated",
+  "metadata": {
+    "displayName": "Climbing Stairs",
+    "shortDescription": "Learn 1-DP through a Forest of Patience jump-quest story.",
+    "difficulty": "easy",
+    "sourceInspiredBy": "Climbing Stairs",
+    "originalTextConfirmed": true,
+    "authors": [
+      "Eric Weng",
+      "Hermes"
+    ],
+    "createdAt": "2026-10-02T00:00:00.000Z",
+    "updatedAt": "2026-10-02T00:00:00.000Z",
+    "category": "1-DP",
+    "topic": "Dynamic Programming"
+  },
+  "story": {
+    "worldName": "Forest of Patience Dojo",
+    "premise": "A neon forest jump quest trains coders to count every route up a tower of ledges using one-ledge hops and two-ledge Flash Jumps before the MP runs out.",
+    "playerRole": "Dojo climber",
+    "dataMetaphor": "ledges",
+    "targetMetaphor": "summit flag",
+    "readMetaphor": "line step",
+    "guide": "Ranger Wren",
+    "victoryText": "Route scroll sealed.",
+    "failureText": "Replay the ledges and find the repeated work."
+  },
+  "concepts": [
+    "1-DP",
+    "dynamic_programming",
+    "climbing_stairs",
+    "fibonacci",
+    "memoization",
+    "tabulation",
+    "space_optimization"
+  ],
+  "runtime": {
+    "language": "python",
+    "signature": "class Solution:\n    def climbStairs(self, n: int) -> int:",
+    "entrypoint": "Solution().climbStairs",
+    "importsAllowed": [],
+    "timeLimitMs": 2000,
+    "timelineEventCap": 3000
+  },
+  "scene": {
+    "type": "array",
+    "renderer": "cyber-stairs-v0",
+    "smallInputMode": "stairs",
+    "largeInputMode": "route-scroll",
+    "visualTokens": {
+      "read": "MP",
+      "target": "summit flag",
+      "node": "ledge"
+    },
+    "trackedVariables": [
+      "n",
+      "i",
+      "a",
+      "b",
+      "prev",
+      "curr",
+      "ways",
+      "dp",
+      "memo"
+    ],
+    "outcomeVisuals": {
+      "passed": "route_scroll_glow",
+      "wrong_answer": "wrong_ledge_marker",
+      "compile_error": "broken_spell_scroll",
+      "runtime_error": "thorn_burst",
+      "over_budget": "empty_mp_meter",
+      "loop_guard": "stuck_on_same_vine",
+      "off_end_read": "fallen_ledge"
+    }
+  },
+  "quests": [
+    {
+      "id": "patience-last-jump",
+      "order": 1,
+      "title": "Quest 1: The last jump",
+      "brief": "Ranger Wren asks you to count short Forest of Patience routes by looking at the final hop or Flash Jump into the summit.",
+      "learningGoal": "See the recurrence: ways(n) = ways(n - 1) + ways(n - 2).",
+      "signature": "count_routes(n) -> int",
+      "entrypoint": "count_routes",
+      "starterCode": "def count_routes(n):\n    # Count routes to ledge n using hops of 1 or 2.\n    pass\n",
+      "hints": [
+        {
+          "id": "h1",
+          "text": "Every route to ledge n ends with one final move. Which two ledges can that move start from?",
+          "cost": "free"
+        },
+        {
+          "id": "h2",
+          "text": "Routes ending in a 1-hop come from n - 1. Routes ending in a 2-hop come from n - 2.",
+          "cost": "free"
+        },
+        {
+          "id": "h3",
+          "text": "The ground has one empty route. Ledge 1 has one hop route.",
+          "cost": "free"
+        }
+      ],
+      "solution": {
+        "code": "def count_routes(n):\n    if n <= 1:\n        return 1\n    return count_routes(n - 1) + count_routes(n - 2)\n",
+        "explanation": "Every route to ledge n must arrive from n - 1 or n - 2, and those groups do not overlap. Recursive code makes that idea visible, but repeats work.",
+        "complexity": {
+          "time": "O(2^n)",
+          "space": "O(n) recursion stack"
+        }
+      },
+      "tests": {
+        "run": [
+          {
+            "id": "two-ledges",
+            "input": {
+              "n": 2
+            },
+            "expected": 2
+          },
+          {
+            "id": "five-ledges",
+            "input": {
+              "n": 5
+            },
+            "expected": 8
+          }
+        ],
+        "replayCaseId": "five-ledges"
+      },
+      "budget": {
+        "enabled": false,
+        "unit": "line_step",
+        "failureMode": "hard_fail"
+      },
+      "unlock": {
+        "requiresQuestIds": [],
+        "requiresPassed": true
+      },
+      "rewards": {
+        "xp": 25
+      },
+      "problem": {
+        "statement": "Given a ledge number n, count how many distinct routes reach ledge n when each move can climb either 1 ledge or 2 ledges.",
+        "gamifiedStatement": "Ranger Wren points at the summit ledge. Every safe route through the Forest of Patience ends with either a normal hop from n - 1 or a Flash Jump from n - 2. Count both route families.",
+        "inputs": [
+          "n: an integer ledge number where 1 <= n <= 10 for this discovery quest"
+        ],
+        "output": "Return the number of distinct routes to ledge n.",
+        "guarantees": [
+          "n is a positive integer.",
+          "Every move is exactly 1 or 2 ledges.",
+          "The answer fits in a Python integer."
+        ],
+        "examples": [
+          {
+            "input": "n = 2",
+            "output": "2",
+            "explanation": "Routes are 1+1 and 2."
+          },
+          {
+            "input": "n = 5",
+            "output": "8",
+            "explanation": "The route count follows 1, 1, 2, 3, 5, 8 from ledge 0 through ledge 5."
+          }
+        ]
+      }
+    },
+    {
+      "id": "patience-route-scroll",
+      "order": 2,
+      "title": "Quest 2: The route scroll",
+      "brief": "The forest is taller now. Fill one route count per ledge instead of recounting the same vines.",
+      "learningGoal": "Build a bottom-up DP table where each state uses the previous two states.",
+      "signature": "fill_scroll(n) -> List[int]",
+      "entrypoint": "fill_scroll",
+      "starterCode": "def fill_scroll(n):\n    # Return [ways to ledge 0, ways to ledge 1, ..., ways to ledge n].\n    pass\n",
+      "hints": [
+        {
+          "id": "h1",
+          "text": "Your list needs n + 1 entries because ledge 0 matters.",
+          "cost": "free"
+        },
+        {
+          "id": "h2",
+          "text": "ways[0] = 1 and ways[1] = 1 are the base ledges.",
+          "cost": "free"
+        },
+        {
+          "id": "h3",
+          "text": "For every i >= 2, write ways[i - 1] + ways[i - 2].",
+          "cost": "free"
+        }
+      ],
+      "solution": {
+        "code": "def fill_scroll(n):\n    ways = [1] * (n + 1)\n    for i in range(2, n + 1):\n        ways[i] = ways[i - 1] + ways[i - 2]\n    return ways\n",
+        "explanation": "Write the route count for each ledge once. When you reach ledge i, the two needed answers are already below you.",
+        "complexity": {
+          "time": "O(n)",
+          "space": "O(n)"
+        }
+      },
+      "tests": {
+        "run": [
+          {
+            "id": "scroll-2",
+            "input": {
+              "n": 2
+            },
+            "expected": [
+              1,
+              1,
+              2
+            ]
+          },
+          {
+            "id": "scroll-5",
+            "input": {
+              "n": 5
+            },
+            "expected": [
+              1,
+              1,
+              2,
+              3,
+              5,
+              8
+            ]
+          }
+        ],
+        "replayCaseId": "scroll-8"
+      },
+      "budget": {
+        "enabled": false,
+        "unit": "line_step",
+        "failureMode": "hard_fail"
+      },
+      "unlock": {
+        "requiresQuestIds": [
+          "patience-last-jump"
+        ],
+        "requiresPassed": true
+      },
+      "rewards": {
+        "xp": 30
+      },
+      "problem": {
+        "statement": "Given n, build a scroll/list where index i stores the number of distinct ways to reach ledge i.",
+        "gamifiedStatement": "The forest is too tall to recount every vine. Ranger Wren gives you a route scroll: write each ledge count once, then use the last two written counts to fill the next ledge.",
+        "inputs": [
+          "n: an integer ledge number where 1 <= n <= 45"
+        ],
+        "output": "Return a list of length n + 1. The value at index i is the number of routes to ledge i.",
+        "guarantees": [
+          "ways[0] is 1 because standing on the ground counts as one empty route.",
+          "ways[1] is 1.",
+          "For i >= 2, ways[i] = ways[i - 1] + ways[i - 2]."
+        ],
+        "examples": [
+          {
+            "input": "n = 2",
+            "output": "[1, 1, 2]",
+            "explanation": "Ground has 1 empty route, ledge 1 has 1 route, ledge 2 has 2 routes."
+          },
+          {
+            "input": "n = 5",
+            "output": "[1, 1, 2, 3, 5, 8]",
+            "explanation": "Each new scroll mark is the sum of the previous two marks."
+          }
+        ]
+      }
+    },
+    {
+      "id": "patience-two-slot-pouch",
+      "order": 3,
+      "title": "Quest 3: Two-slot pouch",
+      "brief": "Scrolls are heavy. Carry only the two route counts needed for the next ledge.",
+      "learningGoal": "Compress 1-DP tabulation from O(n) space to O(1) space.",
+      "signature": "next_pair(a, b) -> tuple",
+      "entrypoint": "next_pair",
+      "starterCode": "def next_pair(a, b):\n    # a = routes to ledge i-2, b = routes to ledge i-1.\n    # Return the pouch for ledges i-1 and i.\n    pass\n",
+      "hints": [
+        {
+          "id": "h1",
+          "text": "After stepping up, the old b becomes the lower pouch slot.",
+          "cost": "free"
+        },
+        {
+          "id": "h2",
+          "text": "The new upper slot is a + b.",
+          "cost": "free"
+        },
+        {
+          "id": "h3",
+          "text": "Return both values together so you do not overwrite a before using it.",
+          "cost": "free"
+        }
+      ],
+      "solution": {
+        "code": "def next_pair(a, b):\n    return b, a + b\n",
+        "explanation": "The pouch shifts up one ledge: keep b, and create the new count a + b.",
+        "complexity": {
+          "time": "O(1)",
+          "space": "O(1)"
+        }
+      },
+      "tests": {
+        "run": [
+          {
+            "id": "ground-to-one",
+            "input": {
+              "a": 1,
+              "b": 1
+            },
+            "expected": [
+              1,
+              2
+            ]
+          },
+          {
+            "id": "two-to-three",
+            "input": {
+              "a": 2,
+              "b": 3
+            },
+            "expected": [
+              3,
+              5
+            ]
+          }
+        ],
+        "replayCaseId": "two-to-three"
+      },
+      "budget": {
+        "enabled": false,
+        "unit": "line_step",
+        "failureMode": "hard_fail"
+      },
+      "unlock": {
+        "requiresQuestIds": [
+          "patience-route-scroll"
+        ],
+        "requiresPassed": true
+      },
+      "rewards": {
+        "xp": 30
+      },
+      "problem": {
+        "statement": "Given two consecutive route counts a and b, return the next pair after climbing one more ledge.",
+        "gamifiedStatement": "The full route scroll is heavy. The two-slot pouch only carries the two counts needed for the next ledge: the lower count a and the upper count b.",
+        "inputs": [
+          "a: routes to the lower previous ledge i - 2",
+          "b: routes to the previous ledge i - 1"
+        ],
+        "output": "Return a pair/list/tuple representing (b, a + b), the shifted pouch after one climb.",
+        "guarantees": [
+          "a and b are non-negative integers.",
+          "a and b represent consecutive Climbing Stairs route counts.",
+          "Returning a tuple is accepted because the runner normalizes tuples to JSON arrays."
+        ],
+        "examples": [
+          {
+            "input": "a = 1, b = 1",
+            "output": "[1, 2]",
+            "explanation": "The old upper slot becomes the lower slot, and the new upper slot is 1 + 1."
+          },
+          {
+            "input": "a = 13, b = 21",
+            "output": "[21, 34]",
+            "explanation": "Shift the pouch up one ledge: keep 21, then create 13 + 21 = 34."
+          }
+        ]
+      }
+    }
+  ],
+  "boss": {
+    "id": "boss-old-bramblehorn",
+    "order": 4,
+    "title": "Boss: Old Bramblehorn",
+    "brief": "Clear the real Climbing Stairs problem: count all routes up n steps with 1-step or 2-step moves.",
+    "learningGoal": "Solve Climbing Stairs in O(n) time with a 1-DP recurrence.",
+    "signature": "class Solution:\n    def climbStairs(self, n: int) -> int",
+    "entrypoint": "Solution().climbStairs",
+    "starterCode": "class Solution:\n    def climbStairs(self, n: int) -> int:\n        pass\n",
+    "hints": [
+      {
+        "id": "h1",
+        "text": "Use the same recurrence: ways(n) = ways(n - 1) + ways(n - 2).",
+        "cost": "free"
+      },
+      {
+        "id": "h2",
+        "text": "The full forest has n up to 45, so plain recursion repeats too much work.",
+        "cost": "free"
+      },
+      {
+        "id": "h3",
+        "text": "Start a, b at the counts for ledge 0 and ledge 1, then shift the pouch upward.",
+        "cost": "free"
+      }
+    ],
+    "solution": {
+      "code": "class Solution:\n    def climbStairs(self, n: int) -> int:\n        a, b = 1, 1\n        for i in range(2, n + 1):\n            a, b = b, a + b\n        return b\n",
+      "explanation": "Start with the base route counts for ledge 0 and ledge 1. Shift the two-slot pouch until b holds the answer for ledge n.",
+      "complexity": {
+        "time": "O(n)",
+        "space": "O(1)"
+      }
+    },
+    "tests": {
+      "run": [
+        {
+          "id": "boss-2",
+          "input": {
+            "n": 2
+          },
+          "expected": 2
+        },
+        {
+          "id": "boss-5",
+          "input": {
+            "n": 5
+          },
+          "expected": 8
+        }
+      ],
+      "replayCaseId": "boss-10"
+    },
+    "budget": {
+      "enabled": false,
+      "unit": "line_step",
+      "failureMode": "hard_fail"
+    },
+    "unlock": {
+      "requiresQuestIds": [
+        "patience-last-jump",
+        "patience-route-scroll",
+        "patience-two-slot-pouch"
+      ],
+      "requiresPassed": true
+    },
+    "rewards": {
+      "xp": 125,
+      "shards": 1
+    },
+    "problem": {
+      "statement": "Given n stairs, count how many distinct ways you can reach the top when each move climbs either 1 stair or 2 stairs.",
+      "gamifiedStatement": "Old Bramblehorn guards the summit gate. To open it, count every legal route through the Forest of Patience without recounting the same ledges again and again.",
+      "inputs": [
+        "n: an integer number of stairs where 1 <= n <= 45"
+      ],
+      "output": "Return the number of distinct ways to climb to the top.",
+      "guarantees": [
+        "n is always at least 1.",
+        "Only 1-step and 2-step moves are allowed.",
+        "The answer fits in a signed 32-bit integer for the given range."
+      ],
+      "examples": [
+        {
+          "input": "n = 2",
+          "output": "2",
+          "explanation": "The possible routes are 1+1 and 2."
+        },
+        {
+          "input": "n = 5",
+          "output": "8",
+          "explanation": "The route counts build as 1, 1, 2, 3, 5, 8, so ledge 5 has 8 routes."
+        }
+      ]
+    }
+  },
+  "review": {
+    "enabled": true,
+    "defaultSchedule": [
+      1,
+      3,
+      7,
+      14,
+      30
+    ],
+    "variants": [
+      {
+        "id": "review-climbing-stairs-core",
+        "title": "Review: Old Bramblehorn rematch",
+        "mutation": "Repeat the boss with saved forest towers to reinforce the 1-DP recurrence.",
+        "tests": {
+          "fixed": [
+            {
+              "id": "review-20",
+              "input": {
+                "n": 20
+              },
+              "expected": 10946
+            },
+            {
+              "id": "review-35",
+              "input": {
+                "n": 35
+              },
+              "expected": 14930352
+            }
+          ],
+          "replayCaseIds": [
+            "review-20"
+          ]
+        }
+      }
+    ],
+    "rules": {
+      "failedReviewIntervalDays": 1,
+      "solutionAssistedIntervalDays": 1,
+      "heavyHintMaxIntervalDays": 3,
+      "snoozeAllowed": true
+    }
+  },
+  "rewards": {
+    "xp": {
+      "questClear": 25,
+      "bossClear": 125,
+      "solutionAssistedMultiplier": 0.5
+    },
+    "currency": {
+      "name": "Shards",
+      "bossClear": 1,
+      "shopEnabled": false
+    }
+  },
+  "validation": {
+    "referenceMustPass": true,
+    "linearScanShouldFailBudget": false,
+    "requiredOutcomeFixtures": [
+      "passed",
+      "wrong_answer",
+      "compile_error",
+      "runtime_error",
+      "over_budget",
+      "loop_guard",
+      "off_end_read"
+    ],
+    "maxTimelineEvents": 3000,
+    "originalTextChecklist": {
+      "noCopiedProblemStatement": true,
+      "originalStory": true,
+      "noRealGameCharactersArtLogosMapsOrUi": true
+    },
+    "visualQualityChecklist": {
+      "lineMovementVisible": true,
+      "pointerMovementVisible": false,
+      "sceneMetaphorOriginal": true,
+      "outcomeVisualsDistinct": true
+    }
+  },
+  "oneQuestionMode": {
+    "enabled": true,
+    "activeProblem": "climbing-stairs",
+    "questionBuildOrder": "one-at-a-time",
+    "runSuite": "tests.run",
+    "submitSuite": "tests.submit",
+    "animationReplay": "tests.replayCaseId"
+  }
+}

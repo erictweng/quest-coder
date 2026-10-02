@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const root = process.cwd();
 const page = readFileSync(`${root}/app/page.tsx`, "utf8");
+const completion = readFileSync(`${root}/components/completion-moment.tsx`, "utf8");
 const css = readFileSync(`${root}/app/globals.css`, "utf8");
 const plan = readFileSync(`${root}/docs/UI_UX_SPRINT_PLAN.md`, "utf8");
 const cyberReport = readFileSync(`${root}/docs/CYBERPUNK_BIT_FINAL_REGRESSION.md`, "utf8");
@@ -44,8 +45,9 @@ milestone("Solve screen preserves full-screen coding workflow", () => {
 });
 
 milestone("Optional support tabs and contextual rewards survive", () => {
+  const supportSource = `${solveBranch}\n${completion}`;
   for (const token of ["Animation", "Hints", "Solution", "Submissions", "View Animation", "Reward toast", "Boss victory moment", "Attempt history"]) {
-    assert(solveBranch.includes(token), `support/reward missing ${token}`);
+    assert(supportSource.includes(token), `support/reward missing ${token}`);
   }
   assert(solveBranch.includes('solveTab === "Animation"'), "animation content must stay tab-gated");
   assert(solveBranch.includes("Quest Notebook"), "support tabs should live in the notebook overlay");

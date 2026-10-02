@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import climbingStairsPack from "../content/packs/forest-of-patience-climbing-stairs.json";
+import { CompletionMoment } from "../components/completion-moment";
+import { ResultSummary } from "../components/result-summary";
+import climbingStairsPack from "../content/public/forest-of-patience-climbing-stairs.json";
 import { appendAttempt, attemptFromFailure, attemptFromResult, describeAttempt, type AttemptRecord } from "../lib/attempts";
 import { backspaceEdit, colonEdit, enterEdit, shiftTabEdit, tabEdit, type EditorEdit } from "../lib/python-editing";
 
@@ -85,6 +87,7 @@ type BaseChallenge = {
   problem?: ProblemPrompt;
   hints?: Hint[];
   unlock: { requiresQuestIds: string[]; requiresPassed: boolean };
+  rewards?: { xp?: number; shards?: number };
 };
 type PackChallenge = BaseChallenge & {
   packSlug: string;
@@ -155,6 +158,7 @@ export default function Home() {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [userNameDraft, setUserNameDraft] = useState("Eric");
   const [userName, setUserName] = useState<string | null>(null);
+  const [serverBacked, setServerBacked] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(EMPTY_PROGRESS);
   const [surface, setSurface] = useState<AppSurface>("hub");
   const [selectedPackSlug, setSelectedPackSlug] = useState(DEFAULT_PACK.slug);
@@ -200,30 +204,57 @@ export default function Home() {
   }, [activePath, activeChallenge.id]);
 
   useEffect(() => {
-    const savedUser = safeLocalStorageGet("quest-coder:session");
-    if (savedUser) {
-      setUserName(savedUser);
-      setUserNameDraft(savedUser);
-    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/session", { cache: "no-store" });
+        const session = await response.json() as { authenticated?: boolean; displayName?: string };
+        if (cancelled || !session.authenticated || !session.displayName) {
+          const savedUser = safeLocalStorageGet("quest-coder:session");
+          if (savedUser && !cancelled) setUserNameDraft(savedUser);
+          return;
+        }
+        const progressResponse = await fetch("/api/progress", { cache: "no-store" });
+        const saved = progressResponse.ok ? (await progressResponse.json() as { progress?: unknown }).progress : null;
+        if (cancelled) return;
+        setUserName(session.displayName);
+        setUserNameDraft(session.displayName);
+        setProgress(normalizeProgress(saved));
+        setServerBacked(true);
+      } catch {
+        const savedUser = safeLocalStorageGet("quest-coder:session");
+        if (savedUser && !cancelled) {
+          setUserName(savedUser);
+          setUserNameDraft(savedUser);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const activeChallengeRef = useRef(activeChallenge);
   activeChallengeRef.current = activeChallenge;
 
   useEffect(() => {
-    if (!storageKey) return;
+    if (!storageKey || serverBacked) return;
     const stored = readProgress(storageKey);
     setProgress(stored);
     // Restore the saved draft for the open challenge; without this the starter code written on mount
     // would be saved back over the player's draft as soon as the profile loaded.
     const challenge = activeChallengeRef.current;
     setCode(stored.savedCode[challenge.id] ?? challenge.starterCode);
-  }, [storageKey]);
+  }, [storageKey, serverBacked]);
 
   useEffect(() => {
     if (!storageKey) return;
     writeProgress(storageKey, progress);
-  }, [progress, storageKey]);
+    if (serverBacked) {
+      const timer = window.setTimeout(() => {
+        void fetch("/api/progress", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ progress }) });
+      }, 150);
+      return () => window.clearTimeout(timer);
+    }
+  }, [progress, storageKey, serverBacked]);
 
   useEffect(() => {
     setCode(progress.savedCode[activeChallenge.id] ?? activeChallenge.starterCode);
@@ -244,6 +275,9 @@ export default function Home() {
     }
     setIsRunning(true);
     setRunError(null);
+    setResult(null);
+    setRecentReward(null);
+    setPassMoment(false);
     setPlaying(false);
     const context = {
       challengeId: activeChallenge.id,
@@ -256,14 +290,14 @@ export default function Home() {
       const response = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: code, packSlug: activeChallenge.packSlug, challengeId: activeChallenge.id, mode })
+        body: JSON.stringify({ source: code, ...context })
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Runner request failed");
       const runResult = payload as RunResult;
       setResult(runResult);
       setCursor(0);
-      if (runResult.passed) {
+      if (runResult.passed && mode === "submit") {
         setPassMoment(true);
         window.setTimeout(() => setPassMoment(false), 1800);
       }
@@ -271,6 +305,7 @@ export default function Home() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown run error";
       setRunError(message);
+      setResult(null);
       // A failed bridge call is still an attempt the player made; keep it in the history so the
       // Submissions tab never silently stays empty after Run basic / Submit all.
       recordAttempt(null, attemptFromFailure(message, context));
@@ -293,14 +328,28 @@ export default function Home() {
     return () => window.clearInterval(id);
   }, [events.length, playing, speed]);
 
-  function signIn() {
+  async function signIn() {
     const normalized = userNameDraft.trim() || "Eric";
-    safeLocalStorageSet("quest-coder:session", normalized);
-    setUserName(normalized);
+    const local = readProgress(`quest-coder:profile:${normalized}`);
+    try {
+      const response = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: normalized }) });
+      if (!response.ok) throw new Error("session unavailable");
+      safeLocalStorageSet("quest-coder:session", normalized);
+      setUserName(normalized);
+      setProgress(local);
+      setServerBacked(true);
+    } catch {
+      safeLocalStorageSet("quest-coder:session", normalized);
+      setUserName(normalized);
+      setProgress(local);
+      setServerBacked(false);
+    }
   }
 
-  function signOut() {
+  async function signOut() {
+    if (serverBacked) await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
     safeLocalStorageRemove("quest-coder:session");
+    setServerBacked(false);
     setUserName(null);
     setProgress(EMPTY_PROGRESS);
     setResult(null);
@@ -310,17 +359,18 @@ export default function Home() {
 
   function recordAttempt(runResult: RunResult | null, attempt: Attempt) {
     const { solutionAssisted, hintCount } = attempt;
+    const authoritativeClear = attempt.mode === "submit" && attempt.passed;
     setProgress((current) => {
       const next: ProgressState = {
         ...current,
-        cleared: { ...current.cleared, [activeChallenge.id]: current.cleared[activeChallenge.id] || attempt.passed },
+        cleared: { ...current.cleared, [activeChallenge.id]: current.cleared[activeChallenge.id] || authoritativeClear },
         attempts: appendAttempt(current.attempts, attempt)
       };
-      if (runResult?.passed && !current.cleared[activeChallenge.id]) {
+      if (authoritativeClear && runResult && !current.cleared[activeChallenge.id]) {
         next.rewards = grantReward(current, activeChallenge, solutionAssisted, hintCount);
         setRecentReward(next.rewards.grants[0] ?? null);
       }
-      if (runResult && activeChallenge.isBoss) next.reviews = scheduleReview(current, activeChallenge, runResult, solutionAssisted, hintCount);
+      if (authoritativeClear && runResult && activeChallenge.isBoss) next.reviews = scheduleReview(current, activeChallenge, runResult, solutionAssisted, hintCount);
       return next;
     });
   }
@@ -375,10 +425,15 @@ export default function Home() {
     setSolutionConfirmOpen(false);
     setRecentReward(null);
     setPassMoment(false);
+    setRunError(null);
   }
 
   function moveToNextQuest() {
-    if (!nextChallenge) return;
+    if (!nextChallenge) {
+      setSurface("campaignDetail");
+      setResult(null);
+      return;
+    }
     selectChallenge(nextChallenge.id);
   }
 
@@ -550,12 +605,14 @@ export default function Home() {
                   <div className="flex flex-wrap items-center gap-2"><StatusPill label={result?.execution.mode ? `${result.execution.mode} suite` : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />{result?.execution.replayCaseId ? <StatusPill label={`animation ${result.execution.replayCaseId}`} tone="purple" /> : null}<button className="control px-3 py-1 text-xs" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Submissions"); }}>Submissions ({activeAttempts.length})</button></div>
                 </div>
                 {runError ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100" role="alert">{runError}</p> : null}
+                {result?.passed && result.execution.mode === "run" ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-300/10 p-3 text-sm text-cyan-50" role="status"><b>Basic checks passed.</b> Submit all to clear this quest and unlock the next stage.</p> : null}
+                {result ? <ResultSummary result={result} onHint={() => { setQuestNotebookOpen(true); setSolveTab("Hints"); }} /> : null}
                 {result ? <CasesPanel result={result} /> : <p className="text-sm text-slate-400">Run basic cases or submit the full suite. Open the Quest Notebook if you need the prompt, examples, hints, animation, or solution gate.</p>}
                 {result?.replay ? <button className="control mt-3" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Animation"); }}>View Animation</button> : null}
               </div>
             </section>
 
-            {result?.passed ? <div className="fixed bottom-24 left-1/2 z-40 w-[min(42rem,calc(100vw-2rem))] -translate-x-1/2" data-testid="completion-floating-panel"><CompletionMoment showFireworks={passMoment} reward={recentReward} isBoss={activeChallenge.isBoss} nextTitle={nextChallenge?.title ?? null} onNext={moveToNextQuest} /></div> : null}
+            {result?.passed && result.execution.mode === "submit" ? <div className="fixed bottom-24 left-1/2 z-40 w-[min(42rem,calc(100vw-2rem))] -translate-x-1/2" data-testid="completion-floating-panel"><CompletionMoment showFireworks={passMoment} reward={recentReward} isBoss={activeChallenge.isBoss} nextTitle={nextChallenge?.title ?? null} onNext={moveToNextQuest} /></div> : null}
 
             <button className="quest-notebook-toggle fixed bottom-5 right-5 z-50 rounded-2xl border-2 border-yellow-200/60 bg-yellow-300 px-4 py-3 font-black text-slate-950 shadow-2xl shadow-yellow-500/20" aria-label={questNotebookOpen ? "Close quest notebook" : "Open quest notebook"} onClick={() => setQuestNotebookOpen((value) => !value)}>📓 Quest Notebook</button>
 
@@ -568,7 +625,7 @@ export default function Home() {
 
                 <div className="neon-maze-panel mb-4 rounded-2xl p-3" aria-label="Mini quest path">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="text-xs uppercase tracking-[0.25em] text-purple-200">Quest path</p><span className="text-xs text-slate-400">one question at a time</span></div>
-                  <div className="flex flex-wrap gap-2">{[...activePack.quests, activePack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isCurrent = challenge.id === activeChallenge.id; const isBoss = challenge.id === activePack.boss.id; return <button key={challenge.id} className={`pellet-node rounded-xl border px-3 py-2 text-xs font-bold ${isCurrent ? "border-cyan-200 bg-cyan-300 text-slate-950" : cleared ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : locked ? "border-slate-600 bg-slate-800/60 text-slate-400" : isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-100" : "border-white/10 bg-white/5 text-slate-200"}`} onClick={() => selectChallenge(challenge.id)}>{isBoss ? "Boss" : `Q${challenge.order ?? "?"}`}</button>; })}</div>
+                  <div className="flex flex-wrap gap-2">{[...activePack.quests, activePack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isCurrent = challenge.id === activeChallenge.id; const isBoss = challenge.id === activePack.boss.id; return <button key={challenge.id} className={`pellet-node rounded-xl border px-3 py-2 text-xs font-bold ${isCurrent ? "border-cyan-200 bg-cyan-300 text-slate-950" : cleared ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : locked ? "border-slate-600 bg-slate-800/60 text-slate-400" : isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-100" : "border-white/10 bg-white/5 text-slate-200"}`} onClick={() => { if (!locked) selectChallenge(challenge.id); }} disabled={locked} aria-disabled={locked} title={locked ? "Clear the previous quest with Submit all first" : undefined}>{isBoss ? "Boss" : `Q${challenge.order ?? "?"}`}</button>; })}</div>
                 </div>
 
                 <div className="mb-4 flex flex-wrap gap-2 text-xs" role="tablist" aria-label="Quest notebook tabs">
@@ -588,29 +645,6 @@ export default function Home() {
       </section>
     </main>
   );
-}
-
-function CompletionMoment({ showFireworks, reward, isBoss, nextTitle, onNext }: { showFireworks: boolean; reward: RewardGrant | null; isBoss: boolean; nextTitle: string | null; onNext: () => void }) {
-  return <div className="completion-moment relative mb-3 overflow-hidden rounded-2xl border border-emerald-300/40 bg-emerald-300/10 p-4 text-sm text-emerald-50" role="status" aria-live="polite" data-testid="completion-moment">
-    <span className="sr-only">Reward toast Boss victory moment next quest unlock animation</span>
-    {showFireworks ? <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-      <span className="firework firework-a">✦</span>
-      <span className="firework firework-b">✧</span>
-      <span className="firework firework-c">✦</span>
-      <span className="firework firework-d">✧</span>
-    </div> : null}
-    <div className="relative flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-full border border-emerald-200 bg-emerald-300 text-2xl font-black text-slate-950 shadow-lg shadow-emerald-300/20" aria-label="Passed">✓</span>
-        <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-emerald-200">{isBoss ? "Boss cleared" : "Quest passed"}</p>
-          <b>{isBoss ? "Firewall opened." : "Clean clear."}</b>
-          <p className="mt-1 text-xs text-emerald-100">{reward ? `+${reward.xp} XP${reward.shards ? ` · +${reward.shards} Shard` : ""}` : "Progress saved."} {nextTitle ? `Next up: ${nextTitle}` : "Path complete."}</p>
-        </div>
-      </div>
-      {nextTitle ? <button className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-emerald-200" onClick={onNext}>Move to next quest</button> : <button className="control" onClick={onNext} disabled>All quests cleared</button>}
-    </div>
-  </div>;
 }
 
 function ProblemDetails({ challenge, attempts, helpUsed }: { challenge: Challenge; attempts: number; helpUsed: number }) {
@@ -701,10 +735,10 @@ function CasesPanel({ result }: { result: RunResult | null }) {
   return <div className="rounded-2xl border border-white/10 bg-black/30 p-3" data-testid="cases-panel">
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Cases</h3>{result ? <span className={`text-xs ${result.passed ? "text-emerald-300" : "text-rose-300"}`}>{passedCount}/{cases.length} passed · {result.execution.mode ?? "run"} suite</span> : null}</div>
     <div className="mt-2 space-y-2 text-sm">
-      {!result ? <p className="text-slate-500">Waiting for runner…</p> : cases.length === 0 ? <p className="text-slate-500">The runner returned no cases for this suite.</p> : cases.map((testCase, index) => (
+      {!result ? <p className="text-slate-500">Waiting for runner…</p> : cases.length === 0 ? <p className="text-slate-500">The runner returned no cases for this suite.</p> : cases.map((testCase) => (
         <div key={testCase.caseId} className="rounded-xl bg-white/5 px-3 py-2" data-testid="case-row">
-          <div className="flex items-center justify-between gap-3"><span>{index === result.execution.replayCaseIndex ? "▶ " : ""}{testCase.caseId}</span><span className={testCase.passed ? "text-emerald-300" : "text-rose-300"}>{testCase.status}</span></div>
-          <p className="mt-1 font-mono text-xs text-slate-400">{formatCaseArguments(testCase)} → expected {formatValue(testCase.expected)}{testCase.passed ? "" : ` · got ${formatValue(testCase.actual)}`}</p>
+          <div className="flex items-center justify-between gap-3"><span>{testCase.caseId === result.execution.replayCaseId ? "▶ " : ""}{testCase.caseId}</span><span className={testCase.passed ? "text-emerald-300" : "text-rose-300"}>{testCase.status}</span></div>
+          {result.execution.mode === "submit" && testCase.caseId.startsWith("hidden-") ? <p className="mt-1 text-xs text-slate-400">Hidden case · inputs and expected value stay server-side</p> : <p className="mt-1 font-mono text-xs text-slate-400">{formatCaseArguments(testCase)} → expected {formatValue(testCase.expected)}{testCase.passed ? "" : ` · got ${formatValue(testCase.actual)}`}</p>}
           {testCase.error ? <p className="mt-1 text-xs text-rose-200">{testCase.error.message}{testCase.error.line ? ` (line ${testCase.error.line})` : ""}</p> : null}
         </div>
       ))}
@@ -726,7 +760,23 @@ function formatTime(value: string) { try { return new Date(value).toLocaleTimeSt
 function isUnlocked(challenge: Challenge, progress: ProgressState) { return challenge.unlock.requiresQuestIds.every((id) => progress.cleared[id]); }
 function collectVars(events: TimelineEvent[], cursor: number) { const vars: Record<string, unknown> = {}; for (let i = 0; i <= cursor && i < events.length; i += 1) Object.assign(vars, events[i].vars ?? {}); return vars; }
 function lineNumbers(code: string) { return code.split("\n").map((_, index) => index + 1).join("\n"); }
-function readProgress(key: string): ProgressState { try { const raw = JSON.parse(window.localStorage.getItem(key) || "{}"); return { ...EMPTY_PROGRESS, ...raw, rewards: { ...EMPTY_REWARDS, ...(raw.rewards ?? {}) }, friendsEnabled: Boolean(raw.friendsEnabled) }; } catch { return EMPTY_PROGRESS; } }
+function normalizeProgress(value: unknown): ProgressState {
+  if (!value || typeof value !== "object") return EMPTY_PROGRESS;
+  const raw = value as Partial<ProgressState>;
+  return {
+    ...EMPTY_PROGRESS,
+    ...raw,
+    cleared: raw.cleared && typeof raw.cleared === "object" ? raw.cleared : {},
+    solutionOpened: raw.solutionOpened && typeof raw.solutionOpened === "object" ? raw.solutionOpened : {},
+    hintsOpened: raw.hintsOpened && typeof raw.hintsOpened === "object" ? raw.hintsOpened : {},
+    attempts: raw.attempts && typeof raw.attempts === "object" ? raw.attempts : {},
+    savedCode: raw.savedCode && typeof raw.savedCode === "object" ? raw.savedCode : {},
+    reviews: raw.reviews && typeof raw.reviews === "object" ? raw.reviews : {},
+    rewards: { ...EMPTY_REWARDS, ...(raw.rewards ?? {}) },
+    friendsEnabled: Boolean(raw.friendsEnabled)
+  };
+}
+function readProgress(key: string): ProgressState { try { return normalizeProgress(JSON.parse(window.localStorage.getItem(key) || "{}")); } catch { return EMPTY_PROGRESS; } }
 function writeProgress(key: string, value: ProgressState) { try { window.localStorage.setItem(key, JSON.stringify(value)); } catch {} }
 function safeLocalStorageGet(key: string) { try { return window.localStorage.getItem(key); } catch { return null; } }
 function safeLocalStorageSet(key: string, value: string) { try { window.localStorage.setItem(key, value); } catch {} }
@@ -796,9 +846,10 @@ function buildStatBar(progress: ProgressState): StatBarData {
   return { label: `${defeated}/${totalBosses} bosses defeated`, percent, detail: `${progress.rewards.xp} XP · ${progress.rewards.shards} Shards · ${Object.values(progress.attempts).flat().length} attempts logged` };
 }
 function rewardForChallenge(challenge: Challenge, solutionAssisted: boolean, hintCount: number) {
-  const baseXp = challenge.isBoss ? 100 : 20;
+  const baseXp = challenge.rewards?.xp ?? (challenge.isBoss ? 100 : 20);
+  const baseShards = challenge.rewards?.shards ?? (challenge.isBoss ? 1 : 0);
   const penalty = solutionAssisted ? 0.5 : hintCount > 0 ? 0.75 : 1;
-  return { xp: Math.max(5, Math.round(baseXp * penalty)), shards: challenge.isBoss ? 1 : 0, reason: challenge.isBoss ? "boss reward grant" : "quest reward grant" };
+  return { xp: Math.max(5, Math.round(baseXp * penalty)), shards: baseShards, reason: challenge.isBoss ? "boss reward grant" : "quest reward grant" };
 }
 function grantReward(current: ProgressState, challenge: Challenge, solutionAssisted: boolean, hintCount: number): RewardWallet {
   const reward = rewardForChallenge(challenge, solutionAssisted, hintCount);

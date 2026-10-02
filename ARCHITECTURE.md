@@ -1,123 +1,93 @@
 # Quest Coder Architecture
 
-## MVP architecture summary
+## Current vertical slice
 
-Quest Coder is a web app with a React/Next.js interface and a server-side CPython runner. The browser never executes player code. The runner returns structured results and a replay timeline; the browser renders that timeline into the RPG scene, code panel, read meter, and outcome visuals.
+Quest Coder currently exposes one campaign: **Forest of Patience — Climbing Stairs**. It contains three learning quests and one final boss. The browser never executes or grades Python.
 
 ```text
-Browser UI
-  -> Next.js route/API boundary
-    -> Runner adapter
-      -> CPython sandbox process
-        -> result + timeline JSON
-    -> content/progress storage
-  -> Replay renderer consumes timeline JSON
+Browser
+  -> Next.js UI and API
+       -> anonymous HttpOnly session + progress repository
+       -> authenticated HTTP runner client
+            -> isolated runner service
+                 -> strict pack/challenge lookup
+                 -> CPython grading process
+                 -> normalized result and replay timeline
 ```
-
-## Chosen stack
-
-### App shell
-
-- Next.js App Router
-- TypeScript
-- React
-- Tailwind CSS
-- Package manager: npm for the initial skeleton
-
-### Runner
-
-- Python 3.11+ CPython service/process invoked from the server boundary.
-- Sprint 1 can use a local process runner.
-- Public launch requires hardened isolation before strangers can run code.
-
-### Data
-
-Sprint 1:
-
-- Checked-in quest-pack fixtures.
-- No accounts required.
-- Attempt data can be local/in-memory while proving the engine.
-
-Personal MVP:
-
-- Postgres-backed persistence.
-- Prisma or a thin SQL layer can be chosen when Sprint 4 starts.
-- Store users, quest packs, progress, attempts, timeline pointers, review schedule, and reward ledger.
-
-### Content
-
-- Quest packs are JSON first.
-- A validator runs reference solutions and schema checks before packs are loadable.
-- Problem text, story, names, and visuals must be original.
 
 ## Runtime boundaries
 
-### Browser boundary
+### Browser
 
-The browser owns:
+The browser owns the editor, Quest Notebook, result presentation, replay rendering, and optimistic UI state. It receives only the public content projection under `content/public/`.
 
-- Library browsing.
-- Quest page and code editor.
-- Submitting source code to the server boundary.
-- Replay theater rendering.
-- Local UI state and playback controls.
+It must not:
 
-The browser must not:
+- execute or infer Python correctness;
+- receive private submit fixtures or expected values;
+- grant authoritative clears or rewards;
+- unlock a stage after `Run basic`.
 
-- Run player Python.
-- Trust client-generated pass/fail results.
-- Require LeetCode/NeetCode text.
+### Next.js
 
-### Next.js server boundary
+Next.js owns:
 
-The server boundary owns:
+- request validation through `lib/run-contract.ts`;
+- authenticated calls to `QUEST_CODER_RUNNER_URL`;
+- anonymous session cookies;
+- SQLite-backed local progress;
+- authoritative, idempotent clear and reward writes after passing Submit responses;
+- public pack delivery and runner readiness reporting.
 
-- Loading validated quest packs.
-- Accepting run submissions.
-- Calling the runner adapter.
-- Returning normalized run results.
-- Later: auth, progress writes, attempt history, review scheduling, and rewards.
+`app/api/run/route.ts` never spawns Python and has no grading fallback. Runner failure returns a structured unavailable/timeout response and fails closed.
 
-### Runner boundary
+### Runner service
 
-The runner owns:
+`runner/service/app.py` is deployed separately from Next.js. It owns:
 
-- Syntax/compile classification.
-- Test execution.
-- Read-count wrappers.
-- Line tracing and variable snapshots.
-- Loop/time guard enforcement.
-- Producing timeline events.
-- Returning structured result types.
+- bearer authentication;
+- strict allowlists for pack, challenge, mode, and request fields;
+- request, response, concurrency, and wall-time limits;
+- launching the CPython grading process with a minimal environment;
+- redacting private Submit arguments and expected values;
+- health and readiness endpoints.
 
-The runner should not know about React components, CSS, user accounts, or reward rules.
+The runner maps IDs to fixtures under `runner/packs/`; callers cannot provide paths, commands, tests, entrypoints, or images.
 
-### Replay renderer boundary
+For hosted execution, run the supplied container with an outbound-denied network, read-only root filesystem, dropped capabilities, non-root user, limited scratch space, PID limit, CPU limit, and memory limit. A stronger microVM/per-run-container provider remains required before unrestricted multi-tenant public traffic.
 
-The renderer owns:
+### Progress repository
 
-- Mapping timeline events to frames.
-- Scene-specific visuals: array doors/skyline, linked-list portals, trees, etc.
-- Code highlighting.
-- Variable tags.
-- Read budget meter.
-- Distinct visuals for pass, wrong answer, compile error, runtime crash, off-end read, loop guard, and over budget.
+Credential-free local mode uses:
 
-The renderer should not recalculate correctness.
+- random opaque session tokens;
+- SHA-256 token hashes in SQLite;
+- `HttpOnly`, `SameSite=Lax` cookies;
+- server-owned clears, reviews, and reward totals;
+- client-owned drafts and presentation history merged without allowing the client to overwrite authoritative fields.
 
-## Sprint 1 runner flow
+The default database lives under `.data/`, which is ignored. Ephemeral serverless filesystems are not durable deployment storage; hosted deployments must mount durable storage or implement the same repository contract with a hosted database.
 
-1. Receive source code, quest id, and selected test set.
-2. Run a fast untraced pass/fail execution.
-3. If needed for replay, run traced execution against the selected replay test.
-4. Count reads with wrapped structures.
-5. Enforce loop/time/read guards.
-6. Normalize result into the timeline format.
-7. Return the structured payload to the app.
+## Content separation
 
-## Result states
+- `content/public/forest-of-patience-climbing-stairs.json`: prompts, examples, hints, starter/reference code, public Run cases, and replay metadata.
+- `runner/packs/forest-of-patience-climbing-stairs.json`: full server-owned Run/Submit grading material.
 
-The app and runner must distinguish:
+A post-build scan must confirm hidden case IDs and expected values do not occur in `.next/static`.
+
+## Progression contract
+
+1. `Run basic` uses public cases and is feedback-only.
+2. Only a passing `Submit all` may clear a stage.
+3. A first clear grants the configured reward once.
+4. Each clear unlocks exactly the next stage.
+5. Completed stages remain replayable.
+6. The final boss produces campaign completion and returns to Campaign.
+7. Refresh restores the session, clears, attempts, drafts, and rewards.
+
+## Result contract
+
+The UI and runner distinguish:
 
 - `compile_error`
 - `runtime_error`
@@ -127,51 +97,33 @@ The app and runner must distinguish:
 - `loop_guard`
 - `off_end_read`
 - `internal_error`
+- boundary failures such as `runner_unavailable`, `runner_timeout`, and `queue_full`
 
-## Security posture by milestone
+Each visible failure provides a diagnosis and one next action without exposing the full solution.
 
-### Sprint 1 local spike
-
-Acceptable:
-
-- Local-only runner.
-- Hard-coded fixture packs.
-- Basic process timeout.
-- No public traffic.
-
-Not acceptable for public use:
-
-- Shared host execution without isolation.
-- Network access from user code.
-- Writable broad filesystem access.
-- Unlimited CPU/memory/time.
-
-### Public readiness
-
-Before public users, require:
-
-- Container or microVM isolation.
-- No network from runner.
-- Read-only filesystem plus scratch tempdir.
-- CPU, memory, process, and wall-time limits.
-- Queue/rate limits.
-- Abuse tests.
-- Timeline size caps and retention policy.
-
-## Initial repository layout
+## Repository layout
 
 ```text
-app/                         Next.js routes and UI shell
-components/                  Reusable React components
-content/packs/               JSON quest packs
-lib/timeline/                Timeline types and renderer adapters
-lib/quests/                  Pack loading helpers
-runner/                      Python runner spike and tests
-schemas/                     JSON schemas
-scripts/                     Validation and dev scripts
-docs/                        Contracts and planning docs
+app/                 Next.js UI and API routes
+components/          Extracted result and completion UI
+content/public/      Browser-safe pack projections
+lib/                 contracts, runner client, progress repository
+runner/packs/        private grading fixtures
+runner/service/      separately deployable HTTP gateway
+runner/tests/        execution and boundary tests
+scripts/             maintained schema/source smoke tests
+tests/e2e/           Playwright behavior tests
+.github/workflows/   release gate
 ```
 
-## Architectural rule of thumb
+## Release gates
 
-If code answers "did the user's program pass?", it belongs server-side or in the runner. If code answers "how should this run be shown?", it belongs in the replay renderer.
+- TypeScript typecheck
+- Python runner tests
+- maintained smoke suite
+- production build
+- Playwright trusted-slice journey
+- dependency audit
+- hidden-fixture scan
+
+If code answers “did the submitted program pass?”, it belongs behind the runner boundary. If code answers “how should the run be shown?”, it belongs in the UI.

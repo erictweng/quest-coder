@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 const root = process.cwd();
 const page = readFileSync(`${root}/app/page.tsx`, "utf8");
-const pack = JSON.parse(readFileSync(`${root}/content/packs/forest-of-patience-climbing-stairs.json`, "utf8"));
+const pack = JSON.parse(readFileSync(`${root}/runner/packs/forest-of-patience-climbing-stairs.json`, "utf8"));
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 function milestone(name, fn) { fn(); console.log(`ok - ${name}`); }
@@ -13,7 +13,7 @@ function runCli(mode) {
   const child = spawnSync("python3", ["runner/quest_runner_cli.py"], {
     cwd: root,
     encoding: "utf8",
-    input: JSON.stringify({ source, packPath: `content/packs/${pack.slug}.json`, challengeId: pack.boss.id, mode }),
+    input: JSON.stringify({ source, packSlug: pack.slug, challengeId: pack.boss.id, mode }),
     maxBuffer: 20 * 1024 * 1024
   });
   assert(child.status === 0, `${mode} runner failed\nSTDOUT:\n${child.stdout}\nSTDERR:\n${child.stderr}`);

@@ -7,3 +7,21 @@ dist
 .DS_Store
 *.log
 tsconfig.tsbuildinfo
+
+# Local runtime and agent state
+.data/
+.hsub/
+AGENTS.md
+CLAUDE.md
+
+# Generated test output
+coverage/
+playwright-report/
+test-results/
+
+# Generated QA evidence (selected release screenshots may be force-added)
+docs/*verification*.png
+docs/*smoke*.png
+docs/*verification*.html
+docs/cyberpunk-token-current-*.png
+docs/sprint13-clean-workspace-*.png
