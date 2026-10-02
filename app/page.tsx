@@ -6,6 +6,7 @@ import reversePack from "../content/packs/reverse-linked-list.json";
 import mergePack from "../content/packs/merge-two-sorted-lists.json";
 import cyclePack from "../content/packs/linked-list-cycle.json";
 import plainBinaryPack from "../content/packs/plain-binary-search.json";
+import climbingStairsPack from "../content/packs/forest-of-patience-climbing-stairs.json";
 
 type Status =
   | "passed"
@@ -133,7 +134,7 @@ type ProgressState = {
   friendsEnabled: boolean;
 };
 
-const PACKS = [samplePack, reversePack, mergePack, cyclePack, plainBinaryPack] as Pack[];
+const PACKS = [samplePack, reversePack, mergePack, cyclePack, plainBinaryPack, climbingStairsPack] as Pack[];
 const PACK_BY_SLUG = Object.fromEntries(PACKS.map((pack) => [pack.slug, pack]));
 const CHALLENGES: Challenge[] = PACKS.flatMap((pack) => [...pack.quests, pack.boss].map((challenge) => ({
   ...challenge,
