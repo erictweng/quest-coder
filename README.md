@@ -43,7 +43,9 @@ npm run smoke:sprint9
 ## Deployment notes
 
 - `vercel.json` is configured for the Next.js app and API routes.
-- `/api/health` exposes launch-readiness metadata.
+- `/api/health` exposes launch-readiness metadata, including which Python interpreter the runner resolved.
+- `/api/run` needs a Python 3 interpreter. It is auto-detected (`python3`, `python`, Homebrew/system paths); set `QUEST_CODER_PYTHON=/path/to/python3` to override, for example when the dev server starts with a minimal `PATH`.
+- `npm run smoke:bugfix-regressions` covers runner command resolution, result-drawer case rows, attempt history, and editor auto-indent.
 - `NEXT_PUBLIC_SITE_URL` should be set to the deployed URL.
 - `NEXT_PUBLIC_ALLOW_INDEXING` defaults to blocked indexing; set to `true` only when ready for discovery.
 - The local child-process Python runner is acceptable for a private beta smoke, but production launch should replace it with the container/microVM boundary described in `docs/SECURITY_REVIEW.md`.

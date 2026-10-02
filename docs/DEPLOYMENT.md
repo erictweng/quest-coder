@@ -21,8 +21,16 @@ NEXT_PUBLIC_ALLOW_INDEXING=false
 NEXT_PUBLIC_APP_VERSION=<git-sha-or-release-label>
 ```
 
+Optional server-side runner setting:
+
+```text
+QUEST_CODER_PYTHON=/usr/bin/python3
+```
+
 Notes:
 
+- `/api/run` spawns a Python 3 child process. It resolves the interpreter from `QUEST_CODER_PYTHON` first, then tries `python3`, `python`, and the usual macOS/Linux install paths (`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`) even when the server's own `PATH` is minimal. If none work the UI shows a "Python 3 runtime not found" message instead of a raw `spawn python3 ENOENT`.
+- Hosted runtimes without a Python binary (for example plain Vercel Node functions) must either provide one or set `QUEST_CODER_PYTHON` to an interpreter that exists in the deployed image. `/api/health` reports the resolved interpreter under `runner.python`.
 - `NEXT_PUBLIC_*` values are public in the browser bundle. Do not put secrets there.
 - Keep `NEXT_PUBLIC_ALLOW_INDEXING=false` during private/link beta.
 - Flip indexing only after the public content and sandbox boundary are final.

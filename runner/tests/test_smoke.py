@@ -136,6 +136,15 @@ class Sprint1RunnerSmokeTests(unittest.TestCase):
         result = run_submission(OFF_END, SMALL_TESTS[:1])
         self.assertEqual(result["status"], "off_end_read")
 
+    def test_cases_expose_arguments_for_result_drawer(self):
+        result = run_submission(WRONG_SEARCH, SMALL_TESTS, quest_id="timequake", budget_limit=80)
+        self.assertEqual(len(result["cases"]), len(SMALL_TESTS))
+        for case, test in zip(result["cases"], SMALL_TESTS):
+            self.assertEqual(case["caseId"], test["id"])
+            self.assertEqual(case["arguments"], test["input"])
+            self.assertEqual(case["expected"], test["expected"])
+            self.assertIn("actual", case)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -490,6 +490,7 @@ def run_one_case(
             "memoryKb": memory_kb,
         },
         "input": replay_input_from_test(test),
+        "arguments": make_jsonable(test.get("input", {})),
         "events": recorder.events,
     }
 
@@ -557,7 +558,7 @@ def run_submission(
         "status": top_status,
         "passed": top_status == "passed",
         "startedAt": started_at,
-        "execution": {"passes": [mode, "traced_replay"], "mode": mode, "suiteSize": len(tests), "replayCaseIndex": replay_index, "replayCaseId": replay_case.get("caseId") if replay_case else None},
+        "execution": {"passes": ["fast", "traced_replay"], "mode": mode, "suiteSize": len(tests), "replayCaseIndex": replay_index, "replayCaseId": replay_case.get("caseId") if replay_case else None},
         "cases": fast_cases,
         "replay": replay_case,
         "limits": {"maxEvents": max_events, "maxDurationMs": timeout_ms, "maxReads": budget_limit},

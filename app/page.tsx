@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import climbingStairsPack from "../content/packs/forest-of-patience-climbing-stairs.json";
+import { appendAttempt, attemptFromFailure, attemptFromResult, describeAttempt, type AttemptRecord } from "../lib/attempts";
+import { backspaceEdit, colonEdit, enterEdit, shiftTabEdit, tabEdit, type EditorEdit } from "../lib/python-editing";
 
 type Status =
   | "passed"
@@ -39,6 +41,7 @@ type ReplayCase = {
   budget: { enabled: boolean; limit?: number; used: number; unit: string; exceeded: boolean };
   summary: { durationMs: number; eventCount: number; truncated: boolean; memoryKb?: number };
   input: { structure: "array" | "linked_list"; values: number[]; target?: number; expectedIndex: unknown };
+  arguments?: Record<string, unknown>;
   events: TimelineEvent[];
 };
 
@@ -91,19 +94,7 @@ type PackChallenge = BaseChallenge & {
   isBoss: boolean;
 };
 type Challenge = PackChallenge;
-type Attempt = {
-  id: string;
-  at: string;
-  challengeId: string;
-  packSlug: string;
-  status: Status;
-  passed: boolean;
-  replayCaseId?: string;
-  eventCount: number;
-  timelinePointer: string;
-  solutionAssisted: boolean;
-  hintCount: number;
-};
+type Attempt = AttemptRecord;
 type ReviewRecord = {
   packSlug: string;
   bossId: string;
@@ -144,7 +135,6 @@ const CHALLENGES: Challenge[] = PACKS.flatMap((pack) => [...pack.quests, pack.bo
   isBoss: challenge.id === pack.boss.id
 })));
 const CHALLENGE_BY_ID = Object.fromEntries(CHALLENGES.map((challenge) => [challenge.id, challenge]));
-const TABS = "    ";
 const PLAY_SPEEDS = [0.5, 1, 2, 4];
 const EMPTY_REWARDS: RewardWallet = { xp: 0, shards: 0, grants: [], shopPreviewUnlocked: false };
 const EMPTY_PROGRESS: ProgressState = { cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false };
@@ -210,9 +200,17 @@ export default function Home() {
     }
   }, []);
 
+  const activeChallengeRef = useRef(activeChallenge);
+  activeChallengeRef.current = activeChallenge;
+
   useEffect(() => {
     if (!storageKey) return;
-    setProgress(readProgress(storageKey));
+    const stored = readProgress(storageKey);
+    setProgress(stored);
+    // Restore the saved draft for the open challenge; without this the starter code written on mount
+    // would be saved back over the player's draft as soon as the profile loaded.
+    const challenge = activeChallengeRef.current;
+    setCode(stored.savedCode[challenge.id] ?? challenge.starterCode);
   }, [storageKey]);
 
   useEffect(() => {
@@ -240,6 +238,13 @@ export default function Home() {
     setIsRunning(true);
     setRunError(null);
     setPlaying(false);
+    const context = {
+      challengeId: activeChallenge.id,
+      packSlug: activeChallenge.packSlug,
+      mode,
+      solutionAssisted: Boolean(progress.solutionOpened[activeChallenge.id]),
+      hintCount: progress.hintsOpened[activeChallenge.id] ?? 0
+    };
     try {
       const response = await fetch("/api/run", {
         method: "POST",
@@ -251,9 +256,13 @@ export default function Home() {
       const runResult = payload as RunResult;
       setResult(runResult);
       setCursor(0);
-      recordAttempt(runResult);
+      recordAttempt(runResult, attemptFromResult(runResult, context));
     } catch (error) {
-      setRunError(error instanceof Error ? error.message : "Unknown run error");
+      const message = error instanceof Error ? error.message : "Unknown run error";
+      setRunError(message);
+      // A failed bridge call is still an attempt the player made; keep it in the history so the
+      // Submissions tab never silently stays empty after Run basic / Submit all.
+      recordAttempt(null, attemptFromFailure(message, context));
     } finally {
       setIsRunning(false);
     }
@@ -287,34 +296,30 @@ export default function Home() {
     setRecentReward(null);
   }
 
-  function recordAttempt(runResult: RunResult) {
-    const solutionAssisted = Boolean(progress.solutionOpened[activeChallenge.id]);
-    const hintCount = progress.hintsOpened[activeChallenge.id] ?? 0;
-    const attempt: Attempt = {
-      id: `${activeChallenge.id}-${Date.now()}`,
-      at: new Date().toISOString(),
-      challengeId: activeChallenge.id,
-      packSlug: activeChallenge.packSlug,
-      status: runResult.status,
-      passed: runResult.passed,
-      replayCaseId: runResult.replay?.caseId,
-      eventCount: runResult.replay?.summary.eventCount ?? 0,
-      timelinePointer: `${activeChallenge.id}:${runResult.replay?.caseId ?? "none"}:${runResult.startedAt}`,
-      solutionAssisted,
-      hintCount
-    };
+  function recordAttempt(runResult: RunResult | null, attempt: Attempt) {
+    const { solutionAssisted, hintCount } = attempt;
     setProgress((current) => {
       const next: ProgressState = {
         ...current,
-        cleared: { ...current.cleared, [activeChallenge.id]: current.cleared[activeChallenge.id] || runResult.passed },
-        attempts: { ...current.attempts, [activeChallenge.id]: [attempt, ...(current.attempts[activeChallenge.id] ?? [])].slice(0, 15) }
+        cleared: { ...current.cleared, [activeChallenge.id]: current.cleared[activeChallenge.id] || attempt.passed },
+        attempts: appendAttempt(current.attempts, attempt)
       };
-      if (runResult.passed && !current.cleared[activeChallenge.id]) {
+      if (runResult?.passed && !current.cleared[activeChallenge.id]) {
         next.rewards = grantReward(current, activeChallenge, solutionAssisted, hintCount);
         setRecentReward(next.rewards.grants[0] ?? null);
       }
-      if (activeChallenge.isBoss) next.reviews = scheduleReview(current, activeChallenge, runResult, solutionAssisted, hintCount);
+      if (runResult && activeChallenge.isBoss) next.reviews = scheduleReview(current, activeChallenge, runResult, solutionAssisted, hintCount);
       return next;
+    });
+  }
+
+  function applyEditorEdit(edit: EditorEdit) {
+    setCode(edit.value);
+    window.requestAnimationFrame(() => {
+      const element = textareaRef.current;
+      if (!element) return;
+      element.focus();
+      element.setSelectionRange(edit.selectionStart, edit.selectionEnd);
     });
   }
 
@@ -379,22 +384,34 @@ export default function Home() {
       void submit("run");
       return;
     }
+    if (event.altKey || event.metaKey || event.ctrlKey) return;
+    // Read the live textarea value rather than React state so a keystroke that lands before the
+    // previous onChange re-render still sees the latest text (for example the ':' just typed).
+    const { value, selectionStart, selectionEnd } = event.currentTarget;
     if (event.key === "Tab") {
       event.preventDefault();
-      const target = event.currentTarget;
-      const { selectionStart, selectionEnd } = target;
-      if (event.shiftKey) outdentSelection(code, selectionStart, selectionEnd, setCode, textareaRef);
-      else insertAtSelection(code, selectionStart, selectionEnd, TABS, setCode, textareaRef);
+      applyEditorEdit(event.shiftKey ? shiftTabEdit(value, selectionStart, selectionEnd) : tabEdit(value, selectionStart, selectionEnd));
       return;
     }
-    if (event.key === "Enter") {
-      const target = event.currentTarget;
-      const lineStart = code.lastIndexOf("\n", target.selectionStart - 1) + 1;
-      const line = code.slice(lineStart, target.selectionStart);
-      const indent = line.match(/^\s*/)?.[0] ?? "";
-      const extra = line.trimEnd().endsWith(":") ? TABS : "";
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      insertAtSelection(code, target.selectionStart, target.selectionEnd, `\n${indent}${extra}`, setCode, textareaRef);
+      applyEditorEdit(enterEdit(value, selectionStart, selectionEnd));
+      return;
+    }
+    if (event.key === "Backspace") {
+      const edit = backspaceEdit(value, selectionStart, selectionEnd);
+      if (edit) {
+        event.preventDefault();
+        applyEditorEdit(edit);
+      }
+      return;
+    }
+    if (event.key === ":") {
+      const edit = colonEdit(value, selectionStart, selectionEnd);
+      if (edit) {
+        event.preventDefault();
+        applyEditorEdit(edit);
+      }
     }
   }
 
@@ -512,9 +529,9 @@ export default function Home() {
               <div className="mt-3 rounded-2xl border border-emerald-300/20 bg-black/40 p-4" aria-label="Console result drawer">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="font-bold">Console / result drawer</h3>
-                  <div className="flex flex-wrap gap-2"><StatusPill label={result?.execution.mode ? `${result.execution.mode} suite` : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />{result?.execution.replayCaseId ? <StatusPill label={`animation ${result.execution.replayCaseId}`} tone="purple" /> : null}</div>
+                  <div className="flex flex-wrap items-center gap-2"><StatusPill label={result?.execution.mode ? `${result.execution.mode} suite` : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />{result?.execution.replayCaseId ? <StatusPill label={`animation ${result.execution.replayCaseId}`} tone="purple" /> : null}<button className="control px-3 py-1 text-xs" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Submissions"); }}>Submissions ({activeAttempts.length})</button></div>
                 </div>
-                {runError ? <p className="rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}
+                {runError ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100" role="alert">{runError}</p> : null}
                 {recentReward ? <div className={`mb-3 rounded-xl border p-3 text-sm ${activeChallenge.isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-50" : "border-yellow-300/30 bg-yellow-300/10 text-yellow-50"}`} role="status" aria-live="polite"><b>{activeChallenge.isBoss ? "Boss victory moment" : "Reward toast"}</b><br />+{recentReward.xp} XP{recentReward.shards ? ` · +${recentReward.shards} Shard` : ""} · {activeChallenge.isBoss ? "review rematch queued" : "next quest unlock animation"}</div> : null}
                 {result ? <CasesPanel result={result} /> : <p className="text-sm text-slate-400">Run basic cases or submit the full suite. Open the Quest Notebook if you need the prompt, examples, hints, animation, or solution gate.</p>}
                 {result?.replay ? <button className="control mt-3" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Animation"); }}>View Animation</button> : null}
@@ -545,7 +562,7 @@ export default function Home() {
                 {solveTab === "Animation" ? <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3"><OutcomeBadge status={result?.status ?? "internal_error"} passed={result?.passed ?? false} /><p className="rounded-xl border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs text-slate-300">Replay case: {result?.execution.replayCaseId ?? result?.replay?.caseId ?? "run code first"}</p><PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} /></div><SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} /><div className="grid gap-4 lg:grid-cols-2"><CodeTrace code={code} activeLine={activeLine} /><VarsPanel vars={latestVars} event={activeEvent} /></div></div> : null}
                 {solveTab === "Hints" ? <div className="rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-50"><h3 className="font-bold">Hints stay secondary</h3><p className="mt-2">Opened hints: {progress.hintsOpened[activeChallenge.id] ?? 0}</p><p className="mt-3 leading-6">{activeChallenge.hints?.[Math.min((progress.hintsOpened[activeChallenge.id] ?? 1) - 1, (activeChallenge.hints?.length ?? 1) - 1)]?.text ?? "No hint text for this quest yet."}</p><button className="control mt-4" onClick={openHint}>Reveal another hint</button></div> : null}
                 {solveTab === "Solution" ? <SolutionGate revealed={Boolean(progress.solutionOpened[activeChallenge.id])} confirming={solutionConfirmOpen} solution={activeChallenge.solution.code} onAskConfirm={() => setSolutionConfirmOpen(true)} onCancel={() => setSolutionConfirmOpen(false)} onReveal={() => { openSolution(); setSolutionConfirmOpen(false); }} /> : null}
-                {solveTab === "Submissions" ? <div className="space-y-4"><CasesPanel result={result} /><p className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">Attempt history lives here, not on the workspace front. Review reminders stay in Hub/Profile/Campaign.</p><AttemptHistory attempts={activeAttempts} /></div> : null}
+                {solveTab === "Submissions" ? <div className="space-y-4">{runError ? <p className="rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}<CasesPanel result={result} /><p className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">Attempt history lives here, not on the workspace front. Review reminders stay in Hub/Profile/Campaign.</p><AttemptHistory attempts={activeAttempts} /></div> : null}
               </aside>
             ) : null}
           </section>        )}
@@ -636,14 +653,37 @@ function LinkedListScene({ replay, vars }: { replay: ReplayCase | null; vars: Re
 function ArrayScene({ replay, activeReadIndex, vars, mode }: { replay: ReplayCase | null; activeReadIndex?: number; vars: Record<string, unknown>; mode: string }) { const values = replay?.input.values ?? []; const target = replay?.input.target; const expected = replay?.input.expectedIndex; const large = mode === "skyline"; const shown = large ? values.slice(0, 80) : values; return <div className="rounded-3xl border border-cyan-300/20 bg-gradient-to-b from-slate-900 to-slate-950 p-4"><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Array scene: {large ? "skyline" : "doors"}</h2><p className="text-sm text-slate-400">target relic: <span className="text-cyan-200">{String(target ?? "?")}</span></p></div><div className={`grid gap-2 ${large ? "grid-cols-[repeat(40,minmax(0,1fr))]" : "grid-cols-7"}`}>{shown.map((value, index) => { const isRead = index === activeReadIndex; const isExpected = index === expected; const hasPointer = Object.values(vars).includes(index); return <div key={`${index}-${value}`} className={`relative flex items-end justify-center rounded-xl border text-xs transition-all ${large ? "h-28" : "h-20"} ${isRead ? "border-cyan-200 bg-cyan-300/30 shadow-lg shadow-cyan-300/30" : "border-white/10 bg-white/5"} ${isExpected ? "ring-2 ring-emerald-300" : ""}`}>{large ? <div className="w-full rounded-t-lg bg-cyan-400/50" style={{ height: `${Math.max(8, (Number(value) / Math.max(1, values.length)) * 100)}%` }} /> : <><span className="absolute top-2 text-[0.65rem] text-slate-500">#{index}</span><span className="pb-4 font-bold">{value}</span></>}{hasPointer ? <span className="absolute -top-3 rounded bg-yellow-300 px-1 text-[0.6rem] font-bold text-slate-950">var</span> : null}</div>; })}</div>{large && values.length > shown.length ? <p className="mt-2 text-xs text-slate-500">Showing first {shown.length} of {values.length} skyline bars to keep 3,000-step replays responsive.</p> : null}</div>; }
 function CodeTrace({ code, activeLine }: { code: string; activeLine?: number }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3"><h3 className="mb-2 font-bold">Line movement</h3><pre className="max-h-80 overflow-auto font-mono text-xs leading-6">{code.split("\n").map((line, index) => <div key={index} className={activeLine === index + 1 ? "rounded bg-cyan-300/20 text-cyan-100" : "text-slate-400"}><span className="mr-3 inline-block w-6 text-right text-slate-600">{index + 1}</span>{line || " "}</div>)}</pre></div>; }
 function VarsPanel({ vars, event }: { vars: Record<string, unknown>; event?: TimelineEvent }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3"><h3 className="font-bold">Variables + event</h3><pre className="mt-2 overflow-auto text-xs text-slate-300">{JSON.stringify({ vars, event }, null, 2)}</pre></div>; }
-function CasesPanel({ result }: { result: RunResult | null }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3"><h3 className="font-bold">Cases</h3><div className="mt-2 space-y-2 text-sm">{result?.cases.map((testCase, index) => <div key={testCase.caseId} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2"><span>{index === result.execution.replayCaseIndex ? "▶ " : ""}{testCase.caseId}</span><span className={testCase.passed ? "text-emerald-300" : "text-rose-300"}>{testCase.status}</span></div>) ?? <p className="text-slate-500">Waiting for runner…</p>}</div></div>; }
-function AttemptHistory({ attempts }: { attempts: Attempt[] }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3"><h3 className="font-bold">Attempt history</h3><div className="mt-2 max-h-52 space-y-2 overflow-auto text-xs">{attempts.length ? attempts.map((attempt) => <div key={attempt.id} className="rounded-xl bg-white/5 p-2"><b>{attempt.status}</b> · {attempt.replayCaseId ?? "no replay"}<br />timeline: {attempt.timelinePointer}<br />{attempt.solutionAssisted ? "solution-assisted" : "unassisted"} · hints {attempt.hintCount}</div>) : <p className="text-slate-500">No attempts yet.</p>}</div></div>; }
+function CasesPanel({ result }: { result: RunResult | null }) {
+  const cases = result?.cases ?? [];
+  const passedCount = cases.filter((testCase) => testCase.passed).length;
+  return <div className="rounded-2xl border border-white/10 bg-black/30 p-3" data-testid="cases-panel">
+    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Cases</h3>{result ? <span className={`text-xs ${result.passed ? "text-emerald-300" : "text-rose-300"}`}>{passedCount}/{cases.length} passed · {result.execution.mode ?? "run"} suite</span> : null}</div>
+    <div className="mt-2 space-y-2 text-sm">
+      {!result ? <p className="text-slate-500">Waiting for runner…</p> : cases.length === 0 ? <p className="text-slate-500">The runner returned no cases for this suite.</p> : cases.map((testCase, index) => (
+        <div key={testCase.caseId} className="rounded-xl bg-white/5 px-3 py-2" data-testid="case-row">
+          <div className="flex items-center justify-between gap-3"><span>{index === result.execution.replayCaseIndex ? "▶ " : ""}{testCase.caseId}</span><span className={testCase.passed ? "text-emerald-300" : "text-rose-300"}>{testCase.status}</span></div>
+          <p className="mt-1 font-mono text-xs text-slate-400">{formatCaseArguments(testCase)} → expected {formatValue(testCase.expected)}{testCase.passed ? "" : ` · got ${formatValue(testCase.actual)}`}</p>
+          {testCase.error ? <p className="mt-1 text-xs text-rose-200">{testCase.error.message}{testCase.error.line ? ` (line ${testCase.error.line})` : ""}</p> : null}
+        </div>
+      ))}
+    </div>
+  </div>;
+}
+function AttemptHistory({ attempts }: { attempts: Attempt[] }) { return <div className="rounded-2xl border border-white/10 bg-black/30 p-3" data-testid="attempt-history"><h3 className="font-bold">Attempt history</h3><div className="mt-2 max-h-52 space-y-2 overflow-auto text-xs">{attempts.length ? attempts.map((attempt) => <div key={attempt.id} className="rounded-xl bg-white/5 p-2" data-testid="attempt-row"><b>{describeAttempt(attempt)}</b> · {formatTime(attempt.at)}<br />replay: {attempt.replayCaseId ?? "none"} · timeline: {attempt.timelinePointer}<br />{attempt.solutionAssisted ? "solution-assisted" : "unassisted"} · hints {attempt.hintCount}{attempt.message ? <><br /><span className="text-rose-200">{attempt.message}</span></> : null}</div>) : <p className="text-slate-500">No attempts yet. Run basic or Submit all to log one.</p>}</div></div>; }
+function formatValue(value: unknown) { if (value === undefined) return "—"; try { return JSON.stringify(value); } catch { return String(value); } }
+function formatCaseArguments(testCase: ReplayCase) {
+  const args = testCase.arguments;
+  if (args && Object.keys(args).length > 0) return Object.entries(args).map(([name, value]) => `${name}=${formatValue(value)}`).join(", ");
+  const parts: string[] = [];
+  if (testCase.input?.values?.length) parts.push(`${testCase.input.structure === "linked_list" ? "list" : "nums"}=${formatValue(testCase.input.values)}`);
+  if (testCase.input?.target !== undefined && testCase.input?.target !== null) parts.push(`target=${formatValue(testCase.input.target)}`);
+  return parts.length ? parts.join(", ") : "input";
+}
+function formatTime(value: string) { try { return new Date(value).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }); } catch { return value; } }
 
 function isUnlocked(challenge: Challenge, progress: ProgressState) { return challenge.unlock.requiresQuestIds.every((id) => progress.cleared[id]); }
 function collectVars(events: TimelineEvent[], cursor: number) { const vars: Record<string, unknown> = {}; for (let i = 0; i <= cursor && i < events.length; i += 1) Object.assign(vars, events[i].vars ?? {}); return vars; }
 function lineNumbers(code: string) { return code.split("\n").map((_, index) => index + 1).join("\n"); }
-function insertAtSelection(code: string, start: number, end: number, text: string, setCode: (value: string) => void, ref: React.RefObject<HTMLTextAreaElement | null>) { const next = `${code.slice(0, start)}${text}${code.slice(end)}`; setCode(next); window.requestAnimationFrame(() => { ref.current?.focus(); ref.current?.setSelectionRange(start + text.length, start + text.length); }); }
-function outdentSelection(code: string, start: number, end: number, setCode: (value: string) => void, ref: React.RefObject<HTMLTextAreaElement | null>) { const lineStart = code.lastIndexOf("\n", start - 1) + 1; const block = code.slice(lineStart, end); const replacement = block.replace(/^ {1,4}/gm, ""); const removedBeforeCursor = block.length - replacement.length; setCode(`${code.slice(0, lineStart)}${replacement}${code.slice(end)}`); window.requestAnimationFrame(() => { ref.current?.focus(); const nextCursor = Math.max(lineStart, start - Math.min(4, removedBeforeCursor)); ref.current?.setSelectionRange(nextCursor, Math.max(nextCursor, end - removedBeforeCursor)); }); }
 function readProgress(key: string): ProgressState { try { const raw = JSON.parse(window.localStorage.getItem(key) || "{}"); return { ...EMPTY_PROGRESS, ...raw, rewards: { ...EMPTY_REWARDS, ...(raw.rewards ?? {}) }, friendsEnabled: Boolean(raw.friendsEnabled) }; } catch { return EMPTY_PROGRESS; } }
 function writeProgress(key: string, value: ProgressState) { try { window.localStorage.setItem(key, JSON.stringify(value)); } catch {} }
 function safeLocalStorageGet(key: string) { try { return window.localStorage.getItem(key); } catch { return null; } }

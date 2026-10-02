@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { findChallenge, loadQuestPack, packPath } from "../../../lib/quests";
+import { PYTHON_ENV_VAR, getPythonCommand, invalidatePythonCommand, pythonArgsPrefix, withPythonSearchPath, type PythonResolution } from "../../../lib/python-runtime";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const RUNNER_TIMEOUT_MS = 7000;
 const MAX_SOURCE_BYTES = 24_000;
@@ -41,7 +45,7 @@ export async function POST(request: Request) {
   try {
     const pack = loadQuestPack(packSlugValue);
     const challenge = findChallenge(pack, challengeIdValue);
-    const result = await withRunnerSlot(() => runQuestRunner({
+    const result = await withRunnerSlot(() => runQuestRunnerWithRetry({
       source: body.source as string,
       packPath: packPath(packSlugValue),
       challengeId: challenge.id,
@@ -57,19 +61,43 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "runner bridge failed", queue: queueSnapshot() },
+      { error: describeRunnerError(error), queue: queueSnapshot() },
       { status: 500 }
     );
   }
 }
 
-function runQuestRunner(payload: { source: string; packPath: string; challengeId: string; mode: RunMode }) {
+type RunnerPayload = { source: string; packPath: string; challengeId: string; mode: RunMode };
+
+/**
+ * Resolves the Python command once per server process and spawns the runner. If the cached
+ * command disappears (ENOENT), the cache is dropped and resolution runs again before giving up.
+ */
+async function runQuestRunnerWithRetry(payload: RunnerPayload) {
+  try {
+    return await runQuestRunner(payload);
+  } catch (error) {
+    if (!isSpawnNotFound(error)) throw error;
+    invalidatePythonCommand();
+    return runQuestRunner(payload);
+  }
+}
+
+function runQuestRunner(payload: RunnerPayload) {
   return new Promise<Record<string, unknown>>((resolve, reject) => {
     const repoRoot = process.cwd();
-    const child = spawn("python3", ["runner/quest_runner_cli.py"], {
+    const env = withPythonSearchPath({ ...process.env, QUEST_CODER_PUBLIC_HARDENED: "1", PYTHONSAFEPATH: "1" });
+    let python: PythonResolution;
+    try {
+      python = getPythonCommand(env);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const child = spawn(python.command, [...pythonArgsPrefix(python.command), "runner/quest_runner_cli.py"], {
       cwd: repoRoot,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, QUEST_CODER_PUBLIC_HARDENED: "1", PYTHONSAFEPATH: "1" }
+      env
     });
 
     let stdout = "";
@@ -84,13 +112,36 @@ function runQuestRunner(payload: { source: string; packPath: string; challengeId
     child.on("error", (error) => { clearTimeout(timeout); reject(error); });
     child.on("close", (code) => {
       clearTimeout(timeout);
-      if (code !== 0) { reject(new Error(stderr || `runner exited with code ${code}`)); return; }
+      if (code !== 0) { reject(new Error(runnerStderrMessage(stderr, code))); return; }
       try { resolve(JSON.parse(stdout) as Record<string, unknown>); }
       catch (error) { reject(new Error(`runner returned invalid JSON: ${error instanceof Error ? error.message : "parse failed"}`)); }
     });
 
+    child.stdin.on("error", () => { /* the close handler reports the real failure */ });
     child.stdin.end(JSON.stringify(payload));
   });
+}
+
+function isSpawnNotFound(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && (error as NodeJS.ErrnoException).code === "ENOENT");
+}
+
+function runnerStderrMessage(stderr: string, code: number | null): string {
+  const text = stderr.trim();
+  if (!text) return `runner exited with code ${code}`;
+  try {
+    const parsed = JSON.parse(text) as { error?: string };
+    if (parsed.error) return parsed.error;
+  } catch { /* plain-text stderr */ }
+  return text;
+}
+
+function describeRunnerError(error: unknown): string {
+  if (isSpawnNotFound(error)) {
+    const command = (error as NodeJS.ErrnoException & { path?: string }).path ?? "python3";
+    return `Python runtime not found (spawn ${command} ENOENT). Install Python 3 or set ${PYTHON_ENV_VAR} to a python3 executable path and restart the server.`;
+  }
+  return error instanceof Error ? error.message : "runner bridge failed";
 }
 
 async function withRunnerSlot<T>(fn: () => Promise<T>): Promise<T> {
