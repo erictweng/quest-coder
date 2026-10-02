@@ -44,7 +44,7 @@ milestone("Split-pane solve and readable editor survive", () => {
 });
 
 milestone("Dedicated cyberpunk smokes are wired", () => {
-  for (const script of ["smoke:cyberpunk-token", "smoke:cyberpunk-hub", "smoke:cyberpunk-campaign", "smoke:cyberpunk-solve", "smoke:cyberpunk-bit"]) {
+  for (const script of ["smoke:cyberpunk-token", "smoke:cyberpunk-hub", "smoke:cyberpunk-campaign", "smoke:cyberpunk-solve", "smoke:cyberpunk-assets", "smoke:cyberpunk-bit"]) {
     assert(pkg.scripts?.[script], `package script missing ${script}`);
   }
   for (const retired of ["smoke:sky-island", "smoke:sky-assets"]) {
