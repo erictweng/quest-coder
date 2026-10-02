@@ -121,9 +121,42 @@ Reference complexity:
 - Time: `O(n)`
 - Space: `O(1)`
 
+## One-question schema
+
+Milestone 1 adds one-question mode metadata and structured prompt data directly to the Climbing Stairs pack.
+
+Pack-level marker:
+
+```json
+"oneQuestionMode": {
+  "enabled": true,
+  "activeProblem": "climbing-stairs",
+  "questionBuildOrder": "one-at-a-time",
+  "runSuite": "tests.run",
+  "submitSuite": "tests.submit",
+  "animationReplay": "tests.replayCaseId"
+}
+```
+
+Each quest and boss now includes:
+
+- `problem.statement`
+- `problem.gamifiedStatement`
+- `problem.inputs`
+- `problem.output`
+- `problem.guarantees`
+- exactly two `problem.examples`
+
+Each quest and boss now splits tests into:
+
+- `tests.run` — basic cases for the Run button
+- `tests.submit` — full cases for Submit
+- `tests.replayCaseId` — the single configured mid-complex animation case
+- `tests.fixed` — temporary compatibility alias for existing runner behavior
+
 ## Verification
 
-Added smoke command:
+Smoke command:
 
 ```bash
 npm run smoke:climbing-stairs
@@ -134,5 +167,9 @@ The smoke test checks:
 - pack metadata and category
 - Forest of Patience story tokens
 - quest order and DP progression
+- one-question mode marker
+- structured problem prompts for every quest/boss
+- exactly two examples for every quest/boss
+- run/submit/replay test schema for every quest/boss
 - all reference solutions pass through the runner
-- app imports and wires the new pack
+- app imports and wires only the Climbing Stairs pack

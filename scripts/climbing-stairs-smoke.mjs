@@ -46,7 +46,38 @@ milestone("Quest path models 1-DP progression", () => {
   assert(pack.boss.solution.complexity.time === "O(n)", "boss should be O(n)");
 });
 
-milestone("Reference solutions pass all tests", () => {
+milestone("One-question schema contains structured problem prompts", () => {
+  assert(pack.oneQuestionMode?.enabled === true, "one-question mode should be enabled");
+  for (const challenge of [...pack.quests, pack.boss]) {
+    const problem = challenge.problem;
+    assert(problem, `${challenge.id} problem object missing`);
+    for (const field of ["statement", "gamifiedStatement", "output"]) {
+      assert(typeof problem[field] === "string" && problem[field].length > 20, `${challenge.id} problem.${field} missing or too short`);
+    }
+    assert(Array.isArray(problem.inputs) && problem.inputs.length >= 1, `${challenge.id} inputs missing`);
+    assert(Array.isArray(problem.guarantees) && problem.guarantees.length >= 2, `${challenge.id} guarantees missing`);
+    assert(Array.isArray(problem.examples) && problem.examples.length === 2, `${challenge.id} should have exactly two examples`);
+    for (const example of problem.examples) {
+      assert(typeof example.input === "string" && example.input.length > 0, `${challenge.id} example input missing`);
+      assert(typeof example.output === "string" && example.output.length > 0, `${challenge.id} example output missing`);
+      assert(typeof example.explanation === "string" && example.explanation.length > 10, `${challenge.id} example explanation missing`);
+    }
+  }
+});
+
+milestone("One-question schema splits run, submit, and replay tests", () => {
+  for (const challenge of [...pack.quests, pack.boss]) {
+    const tests = challenge.tests;
+    assert(Array.isArray(tests.run) && tests.run.length >= 1, `${challenge.id} run suite missing`);
+    assert(Array.isArray(tests.submit) && tests.submit.length >= tests.run.length, `${challenge.id} submit suite missing or too small`);
+    assert(Array.isArray(tests.fixed) && tests.fixed.length === tests.submit.length, `${challenge.id} fixed compatibility suite should mirror submit`);
+    assert(typeof tests.replayCaseId === "string", `${challenge.id} replayCaseId missing`);
+    assert(tests.submit.some((testCase) => testCase.id === tests.replayCaseId), `${challenge.id} replay case must exist in submit suite`);
+    assert(tests.submit.length > tests.run.length, `${challenge.id} submit should include more cases than run`);
+  }
+});
+
+milestone("Reference solutions pass all submit tests", () => {
   for (const challenge of [...pack.quests, pack.boss]) runReference(challenge);
 });
 

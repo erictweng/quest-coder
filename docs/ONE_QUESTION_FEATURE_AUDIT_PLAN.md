@@ -158,38 +158,29 @@ Gap:
 
 ## Implementation plan
 
-### Milestone 1 — Data schema for one-question mode
+### Milestone 1 — Data schema for one-question mode ✅ Complete
+
+Implemented in commit work after this plan:
+
+- Added `oneQuestionMode` pack marker.
+- Added structured `problem` objects to every Climbing Stairs quest and boss.
+- Added `tests.run`, `tests.submit`, and `tests.replayCaseId` to every challenge.
+- Kept `tests.fixed` as a compatibility alias for the current runner.
+- Expanded `npm run smoke:climbing-stairs` to enforce the new schema.
 
 Files:
 
 - `content/packs/forest-of-patience-climbing-stairs.json`
-- `lib/quests.ts`
 - `scripts/climbing-stairs-smoke.mjs`
+- `docs/CLIMBING_STAIRS_QUEST_DRAFT.md`
 
-Work:
+Acceptance verified:
 
-1. Add structured prompt data to each Climbing Stairs quest/boss:
-   - `problem.statement`
-   - `problem.gamifiedStatement`
-   - `problem.inputs`
-   - `problem.output`
-   - `problem.guarantees`
-   - `problem.examples[0..1]`
-2. Split tests into:
-   - `tests.run`
-   - `tests.submit`
-   - `tests.replayCaseId`
-3. Keep `tests.fixed` only if needed for backward compatibility.
-4. Add smoke assertions for:
-   - every active challenge has structured problem text
-   - every active challenge has exactly two examples
-   - every active challenge has run/submit/replay test config
-   - replay case exists in one of the test suites
-
-Acceptance:
-
-- `npm run smoke:climbing-stairs` passes.
-- Existing runner still passes until backend mode split lands.
+- `npm run smoke:climbing-stairs`
+- `npm run typecheck`
+- `npm run build`
+- `npm run smoke:sprint3`
+- `npm run smoke:ui-redesign`
 
 ### Milestone 2 — Backend run/submit split
 

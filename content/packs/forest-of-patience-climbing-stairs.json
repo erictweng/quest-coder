@@ -160,7 +160,68 @@
         ],
         "replayCaseIds": [
           "five-ledges"
-        ]
+        ],
+        "run": [
+          {
+            "id": "two-ledges",
+            "input": {
+              "n": 2
+            },
+            "expected": 2
+          },
+          {
+            "id": "five-ledges",
+            "input": {
+              "n": 5
+            },
+            "expected": 8
+          }
+        ],
+        "submit": [
+          {
+            "id": "one-ledge",
+            "input": {
+              "n": 1
+            },
+            "expected": 1
+          },
+          {
+            "id": "two-ledges",
+            "input": {
+              "n": 2
+            },
+            "expected": 2
+          },
+          {
+            "id": "three-ledges",
+            "input": {
+              "n": 3
+            },
+            "expected": 3
+          },
+          {
+            "id": "five-ledges",
+            "input": {
+              "n": 5
+            },
+            "expected": 8
+          },
+          {
+            "id": "seven-ledges",
+            "input": {
+              "n": 7
+            },
+            "expected": 21
+          },
+          {
+            "id": "ten-ledges",
+            "input": {
+              "n": 10
+            },
+            "expected": 89
+          }
+        ],
+        "replayCaseId": "five-ledges"
       },
       "budget": {
         "enabled": false,
@@ -173,6 +234,31 @@
       },
       "rewards": {
         "xp": 25
+      },
+      "problem": {
+        "statement": "Given a ledge number n, count how many distinct routes reach ledge n when each move can climb either 1 ledge or 2 ledges.",
+        "gamifiedStatement": "Ranger Wren points at the summit ledge. Every safe route through the Forest of Patience ends with either a normal hop from n - 1 or a Flash Jump from n - 2. Count both route families.",
+        "inputs": [
+          "n: an integer ledge number where 1 <= n <= 10 for this discovery quest"
+        ],
+        "output": "Return the number of distinct routes to ledge n.",
+        "guarantees": [
+          "n is a positive integer.",
+          "Every move is exactly 1 or 2 ledges.",
+          "The answer fits in a Python integer."
+        ],
+        "examples": [
+          {
+            "input": "n = 2",
+            "output": "2",
+            "explanation": "Routes are 1+1 and 2."
+          },
+          {
+            "input": "n = 5",
+            "output": "8",
+            "explanation": "The route count follows 1, 1, 2, 3, 5, 8 from ledge 0 through ledge 5."
+          }
+        ]
       }
     },
     {
@@ -349,7 +435,172 @@
         ],
         "replayCaseIds": [
           "scroll-8"
-        ]
+        ],
+        "run": [
+          {
+            "id": "scroll-2",
+            "input": {
+              "n": 2
+            },
+            "expected": [
+              1,
+              1,
+              2
+            ]
+          },
+          {
+            "id": "scroll-5",
+            "input": {
+              "n": 5
+            },
+            "expected": [
+              1,
+              1,
+              2,
+              3,
+              5,
+              8
+            ]
+          }
+        ],
+        "submit": [
+          {
+            "id": "scroll-1",
+            "input": {
+              "n": 1
+            },
+            "expected": [
+              1,
+              1
+            ]
+          },
+          {
+            "id": "scroll-2",
+            "input": {
+              "n": 2
+            },
+            "expected": [
+              1,
+              1,
+              2
+            ]
+          },
+          {
+            "id": "scroll-5",
+            "input": {
+              "n": 5
+            },
+            "expected": [
+              1,
+              1,
+              2,
+              3,
+              5,
+              8
+            ]
+          },
+          {
+            "id": "scroll-8",
+            "input": {
+              "n": 8
+            },
+            "expected": [
+              1,
+              1,
+              2,
+              3,
+              5,
+              8,
+              13,
+              21,
+              34
+            ]
+          },
+          {
+            "id": "scroll-20",
+            "input": {
+              "n": 20
+            },
+            "expected": [
+              1,
+              1,
+              2,
+              3,
+              5,
+              8,
+              13,
+              21,
+              34,
+              55,
+              89,
+              144,
+              233,
+              377,
+              610,
+              987,
+              1597,
+              2584,
+              4181,
+              6765,
+              10946
+            ]
+          },
+          {
+            "id": "full-forest-scroll",
+            "input": {
+              "n": 45
+            },
+            "expected": [
+              1,
+              1,
+              2,
+              3,
+              5,
+              8,
+              13,
+              21,
+              34,
+              55,
+              89,
+              144,
+              233,
+              377,
+              610,
+              987,
+              1597,
+              2584,
+              4181,
+              6765,
+              10946,
+              17711,
+              28657,
+              46368,
+              75025,
+              121393,
+              196418,
+              317811,
+              514229,
+              832040,
+              1346269,
+              2178309,
+              3524578,
+              5702887,
+              9227465,
+              14930352,
+              24157817,
+              39088169,
+              63245986,
+              102334155,
+              165580141,
+              267914296,
+              433494437,
+              701408733,
+              1134903170,
+              1836311903
+            ]
+          }
+        ],
+        "replayCaseId": "scroll-8"
       },
       "budget": {
         "enabled": false,
@@ -364,6 +615,31 @@
       },
       "rewards": {
         "xp": 30
+      },
+      "problem": {
+        "statement": "Given n, build a scroll/list where index i stores the number of distinct ways to reach ledge i.",
+        "gamifiedStatement": "The forest is too tall to recount every vine. Ranger Wren gives you a route scroll: write each ledge count once, then use the last two written counts to fill the next ledge.",
+        "inputs": [
+          "n: an integer ledge number where 1 <= n <= 45"
+        ],
+        "output": "Return a list of length n + 1. The value at index i is the number of routes to ledge i.",
+        "guarantees": [
+          "ways[0] is 1 because standing on the ground counts as one empty route.",
+          "ways[1] is 1.",
+          "For i >= 2, ways[i] = ways[i - 1] + ways[i - 2]."
+        ],
+        "examples": [
+          {
+            "input": "n = 2",
+            "output": "[1, 1, 2]",
+            "explanation": "Ground has 1 empty route, ledge 1 has 1 route, ledge 2 has 2 routes."
+          },
+          {
+            "input": "n = 5",
+            "output": "[1, 1, 2, 3, 5, 8]",
+            "explanation": "Each new scroll mark is the sum of the previous two marks."
+          }
+        ]
       }
     },
     {
@@ -471,7 +747,100 @@
         ],
         "replayCaseIds": [
           "two-to-three"
-        ]
+        ],
+        "run": [
+          {
+            "id": "ground-to-one",
+            "input": {
+              "a": 1,
+              "b": 1
+            },
+            "expected": [
+              1,
+              2
+            ]
+          },
+          {
+            "id": "two-to-three",
+            "input": {
+              "a": 2,
+              "b": 3
+            },
+            "expected": [
+              3,
+              5
+            ]
+          }
+        ],
+        "submit": [
+          {
+            "id": "ground-to-one",
+            "input": {
+              "a": 1,
+              "b": 1
+            },
+            "expected": [
+              1,
+              2
+            ]
+          },
+          {
+            "id": "one-to-two",
+            "input": {
+              "a": 1,
+              "b": 2
+            },
+            "expected": [
+              2,
+              3
+            ]
+          },
+          {
+            "id": "two-to-three",
+            "input": {
+              "a": 2,
+              "b": 3
+            },
+            "expected": [
+              3,
+              5
+            ]
+          },
+          {
+            "id": "six-to-seven",
+            "input": {
+              "a": 13,
+              "b": 21
+            },
+            "expected": [
+              21,
+              34
+            ]
+          },
+          {
+            "id": "made-up-pouch",
+            "input": {
+              "a": 4,
+              "b": 7
+            },
+            "expected": [
+              7,
+              11
+            ]
+          },
+          {
+            "id": "wide-pouch",
+            "input": {
+              "a": 89,
+              "b": 144
+            },
+            "expected": [
+              144,
+              233
+            ]
+          }
+        ],
+        "replayCaseId": "two-to-three"
       },
       "budget": {
         "enabled": false,
@@ -486,6 +855,32 @@
       },
       "rewards": {
         "xp": 30
+      },
+      "problem": {
+        "statement": "Given two consecutive route counts a and b, return the next pair after climbing one more ledge.",
+        "gamifiedStatement": "The full route scroll is heavy. The two-slot pouch only carries the two counts needed for the next ledge: the lower count a and the upper count b.",
+        "inputs": [
+          "a: routes to the lower previous ledge i - 2",
+          "b: routes to the previous ledge i - 1"
+        ],
+        "output": "Return a pair/list/tuple representing (b, a + b), the shifted pouch after one climb.",
+        "guarantees": [
+          "a and b are non-negative integers.",
+          "a and b represent consecutive Climbing Stairs route counts.",
+          "Returning a tuple is accepted because the runner normalizes tuples to JSON arrays."
+        ],
+        "examples": [
+          {
+            "input": "a = 1, b = 1",
+            "output": "[1, 2]",
+            "explanation": "The old upper slot becomes the lower slot, and the new upper slot is 1 + 1."
+          },
+          {
+            "input": "a = 13, b = 21",
+            "output": "[21, 34]",
+            "explanation": "Shift the pouch up one ledge: keep 21, then create 13 + 21 = 34."
+          }
+        ]
       }
     }
   ],
@@ -598,7 +993,96 @@
       ],
       "replayCaseIds": [
         "boss-10"
-      ]
+      ],
+      "run": [
+        {
+          "id": "boss-2",
+          "input": {
+            "n": 2
+          },
+          "expected": 2
+        },
+        {
+          "id": "boss-5",
+          "input": {
+            "n": 5
+          },
+          "expected": 8
+        }
+      ],
+      "submit": [
+        {
+          "id": "boss-1",
+          "input": {
+            "n": 1
+          },
+          "expected": 1
+        },
+        {
+          "id": "boss-2",
+          "input": {
+            "n": 2
+          },
+          "expected": 2
+        },
+        {
+          "id": "boss-3",
+          "input": {
+            "n": 3
+          },
+          "expected": 3
+        },
+        {
+          "id": "boss-5",
+          "input": {
+            "n": 5
+          },
+          "expected": 8
+        },
+        {
+          "id": "boss-10",
+          "input": {
+            "n": 10
+          },
+          "expected": 89
+        },
+        {
+          "id": "boss-18",
+          "input": {
+            "n": 18
+          },
+          "expected": 4181
+        },
+        {
+          "id": "boss-30",
+          "input": {
+            "n": 30
+          },
+          "expected": 1346269
+        },
+        {
+          "id": "boss-38",
+          "input": {
+            "n": 38
+          },
+          "expected": 63245986
+        },
+        {
+          "id": "boss-44",
+          "input": {
+            "n": 44
+          },
+          "expected": 1134903170
+        },
+        {
+          "id": "boss-45-full-forest",
+          "input": {
+            "n": 45
+          },
+          "expected": 1836311903
+        }
+      ],
+      "replayCaseId": "boss-10"
     },
     "budget": {
       "enabled": false,
@@ -616,6 +1100,31 @@
     "rewards": {
       "xp": 125,
       "shards": 1
+    },
+    "problem": {
+      "statement": "Given n stairs, count how many distinct ways you can reach the top when each move climbs either 1 stair or 2 stairs.",
+      "gamifiedStatement": "Old Bramblehorn guards the summit gate. To open it, count every legal route through the Forest of Patience without recounting the same ledges again and again.",
+      "inputs": [
+        "n: an integer number of stairs where 1 <= n <= 45"
+      ],
+      "output": "Return the number of distinct ways to climb to the top.",
+      "guarantees": [
+        "n is always at least 1.",
+        "Only 1-step and 2-step moves are allowed.",
+        "The answer fits in a signed 32-bit integer for the given range."
+      ],
+      "examples": [
+        {
+          "input": "n = 2",
+          "output": "2",
+          "explanation": "The possible routes are 1+1 and 2."
+        },
+        {
+          "input": "n = 5",
+          "output": "8",
+          "explanation": "The route counts build as 1, 1, 2, 3, 5, 8, so ledge 5 has 8 routes."
+        }
+      ]
     }
   },
   "review": {
@@ -698,5 +1207,13 @@
       "sceneMetaphorOriginal": true,
       "outcomeVisualsDistinct": true
     }
+  },
+  "oneQuestionMode": {
+    "enabled": true,
+    "activeProblem": "climbing-stairs",
+    "questionBuildOrder": "one-at-a-time",
+    "runSuite": "tests.run",
+    "submitSuite": "tests.submit",
+    "animationReplay": "tests.replayCaseId"
   }
 }
