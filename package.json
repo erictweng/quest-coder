@@ -26,7 +26,8 @@
     "smoke:sky-island": "node scripts/sky-island-aesthetic-smoke.mjs",
     "smoke:sky-assets": "node scripts/sky-island-assets-smoke.mjs",
     "smoke:cyberpunk-token": "node scripts/cyberpunk-token-smoke.mjs",
-    "smoke:cyberpunk-hub": "node scripts/cyberpunk-hub-smoke.mjs"
+    "smoke:cyberpunk-hub": "node scripts/cyberpunk-hub-smoke.mjs",
+    "smoke:cyberpunk-campaign": "node scripts/cyberpunk-campaign-smoke.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "latest",
