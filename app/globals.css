@@ -123,8 +123,7 @@ summary:focus-visible,
   opacity: 0.62;
 }
 
-.neon-maze-panel,
-.floating-island-panel {
+.neon-maze-panel {
   border: 2px solid color-mix(in srgb, var(--qc-maze-blue) 64%, var(--qc-border-muted));
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--qc-neon-cyan) 8%, transparent), transparent 34%),
@@ -132,22 +131,19 @@ summary:focus-visible,
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--qc-neon-cyan) 22%, transparent), 0 0 34px color-mix(in srgb, var(--qc-maze-blue) 18%, transparent), 0 20px 48px rgb(0 0 0 / 0.35);
 }
 
-.terminal-card,
-.wood-sign-panel {
+.terminal-card {
   border: 2px solid color-mix(in srgb, var(--qc-pac-yellow) 54%, var(--qc-maze-blue));
   background: linear-gradient(180deg, color-mix(in srgb, var(--qc-panel) 90%, var(--qc-grid)), color-mix(in srgb, var(--qc-grid) 84%, var(--qc-void)));
   box-shadow: 4px 4px 0 color-mix(in srgb, var(--qc-maze-blue) 45%, transparent), 0 0 26px color-mix(in srgb, var(--qc-neon-cyan) 12%, transparent);
 }
 
-.firewall-gate,
-.sky-gate-boss {
+.firewall-gate {
   border-color: color-mix(in srgb, var(--qc-ghost-pink) 65%, var(--qc-border)) !important;
   background: linear-gradient(180deg, color-mix(in srgb, var(--qc-panel-2) 68%, var(--qc-ghost-pink)), color-mix(in srgb, var(--qc-ghost-red) 18%, var(--qc-void))) !important;
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--qc-power-blue) 16%, transparent), 0 0 30px color-mix(in srgb, var(--qc-ghost-pink) 22%, transparent);
 }
 
-.pellet-node,
-.quest-stepping-stone {
+.pellet-node {
   border-radius: 999px;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--qc-pac-yellow) 30%, transparent), 0 0 14px color-mix(in srgb, var(--qc-pac-yellow) 16%, transparent);
 }
@@ -157,16 +153,14 @@ summary:focus-visible,
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--qc-power-blue) 42%, transparent), 0 0 18px color-mix(in srgb, var(--qc-power-blue) 28%, transparent);
 }
 
-.cyber-asset,
-.sky-asset {
+.cyber-asset {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   flex: none;
   filter: drop-shadow(0 6px 0 rgb(7 8 20 / 0.45));
 }
 
-.cyber-asset-soft,
-.sky-asset-soft {
+.cyber-asset-soft {
   opacity: 0.82;
   filter: drop-shadow(0 4px 0 rgb(7 8 20 / 0.22));
 }
