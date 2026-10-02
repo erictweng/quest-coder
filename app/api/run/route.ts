@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { findChallenge, loadQuestPack, packPath } from "../../../lib/quests";
 import { PYTHON_ENV_VAR, getPythonCommand, invalidatePythonCommand, pythonArgsPrefix, withPythonSearchPath, type PythonResolution } from "../../../lib/python-runtime";
+import { canUseClimbingStairsFallback, runClimbingStairsFallback } from "../../../lib/climbing-stairs-fallback";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,12 +46,18 @@ export async function POST(request: Request) {
   try {
     const pack = loadQuestPack(packSlugValue);
     const challenge = findChallenge(pack, challengeIdValue);
-    const result = await withRunnerSlot(() => runQuestRunnerWithRetry({
-      source: body.source as string,
-      packPath: packPath(packSlugValue),
-      challengeId: challenge.id,
-      mode
-    }));
+    let result: Record<string, unknown>;
+    try {
+      result = await withRunnerSlot(() => runQuestRunnerWithRetry({
+        source: body.source as string,
+        packPath: packPath(packSlugValue),
+        challengeId: challenge.id,
+        mode
+      }));
+    } catch (error) {
+      if (!isPythonUnavailable(error) || !canUseClimbingStairsFallback(pack.slug)) throw error;
+      result = runClimbingStairsFallback({ source: body.source as string, pack, challenge, mode });
+    }
     return NextResponse.json({
       ...result,
       pack: { id: pack.id, slug: pack.slug, title: pack.title },
@@ -124,6 +131,10 @@ function runQuestRunner(payload: RunnerPayload) {
 
 function isSpawnNotFound(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as NodeJS.ErrnoException).code === "ENOENT");
+}
+
+function isPythonUnavailable(error: unknown): boolean {
+  return isSpawnNotFound(error) || (error instanceof Error && error.message.includes("Python 3 runtime not found"));
 }
 
 function runnerStderrMessage(stderr: string, code: number | null): string {

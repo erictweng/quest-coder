@@ -27,6 +27,7 @@ async function loadTs(relativePath) {
 const runtime = await loadTs("lib/python-runtime.ts");
 const editing = await loadTs("lib/python-editing.ts");
 const attempts = await loadTs("lib/attempts.ts");
+const fallbackRunner = await loadTs("lib/climbing-stairs-fallback.ts");
 
 const WRONG_SOLUTION = "class Solution:\n    def climbStairs(self, n: int) -> int:\n        return n\n";
 
@@ -77,9 +78,21 @@ await milestone("Real Python resolves even when the server PATH is empty (the EN
 
 await milestone("/api/run spawns through the resolver instead of a hard-coded python3", async () => {
   assert(!route.includes('spawn("python3"'), "route still hard-codes spawn(\"python3\")");
-  for (const token of ["getPythonCommand(", "invalidatePythonCommand()", "pythonArgsPrefix(", "withPythonSearchPath(", "isSpawnNotFound(error)", "PYTHON_ENV_VAR", 'export const runtime = "nodejs"']) {
+  for (const token of ["getPythonCommand(", "invalidatePythonCommand()", "pythonArgsPrefix(", "withPythonSearchPath(", "isSpawnNotFound(error)", "isPythonUnavailable(error)", "runClimbingStairsFallback", "PYTHON_ENV_VAR", 'export const runtime = "nodejs"']) {
     assert(route.includes(token), `route missing ${token}`);
   }
+});
+
+await milestone("Climbing Stairs fallback keeps the compiler usable when Python is unavailable", async () => {
+  assert(fallbackRunner.canUseClimbingStairsFallback(pack.slug), "fallback should be scoped to the active Climbing Stairs pack");
+  const run = fallbackRunner.runClimbingStairsFallback({ source: pack.boss.solution.code, pack, challenge: pack.boss, mode: "run" });
+  const submit = fallbackRunner.runClimbingStairsFallback({ source: pack.boss.solution.code, pack, challenge: pack.boss, mode: "submit" });
+  const wrong = fallbackRunner.runClimbingStairsFallback({ source: WRONG_SOLUTION, pack, challenge: pack.boss, mode: "submit" });
+  assert(run.passed && run.cases.length === pack.boss.tests.run.length, "fallback run should pass basic cases");
+  assert(submit.passed && submit.cases.length === pack.boss.tests.submit.length, "fallback submit should pass full cases");
+  assert(run.execution.fallbackRuntime === "typescript-climbing-stairs-v0", "fallback runtime marker missing");
+  assert(run.replay.caseId === pack.boss.tests.replayCaseId, "fallback should use configured replay case");
+  assert(!wrong.passed && wrong.cases.some((testCase) => testCase.status === "wrong_answer"), "fallback should still surface wrong answers");
 });
 
 let runResult;

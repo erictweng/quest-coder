@@ -29,8 +29,8 @@ QUEST_CODER_PYTHON=/usr/bin/python3
 
 Notes:
 
-- `/api/run` spawns a Python 3 child process. It resolves the interpreter from `QUEST_CODER_PYTHON` first, then tries `python3`, `python`, and the usual macOS/Linux install paths (`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`) even when the server's own `PATH` is minimal. If none work the UI shows a "Python 3 runtime not found" message instead of a raw `spawn python3 ENOENT`.
-- Hosted runtimes without a Python binary (for example plain Vercel Node functions) must either provide one or set `QUEST_CODER_PYTHON` to an interpreter that exists in the deployed image. `/api/health` reports the resolved interpreter under `runner.python`.
+- `/api/run` spawns a Python 3 child process. It resolves the interpreter from `QUEST_CODER_PYTHON` first, then tries `python3`, `python`, and the usual macOS/Linux install paths (`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`) even when the server's own `PATH` is minimal. If none work, the active one-question Climbing Stairs pack falls back to a scoped TypeScript evaluator so Run/Submit still returns cases instead of a raw `spawn python3 ENOENT`.
+- Hosted runtimes without a Python binary (for example plain Vercel Node functions) should still provide one or set `QUEST_CODER_PYTHON` for real Python execution. The TypeScript fallback is intentionally limited to `forest-of-patience-climbing-stairs`; add a real Python service before broad multi-problem public launch. `/api/health` reports the resolved interpreter under `runner.python` when available.
 - `NEXT_PUBLIC_*` values are public in the browser bundle. Do not put secrets there.
 - Keep `NEXT_PUBLIC_ALLOW_INDEXING=false` during private/link beta.
 - Flip indexing only after the public content and sandbox boundary are final.
