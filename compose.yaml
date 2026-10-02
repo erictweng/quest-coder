@@ -6,8 +6,10 @@ services:
     environment:
       QUEST_CODER_RUNNER_TOKEN: ${QUEST_CODER_RUNNER_TOKEN:?set QUEST_CODER_RUNNER_TOKEN}
       QUEST_CODER_RUNNER_HOST: 0.0.0.0
-    ports:
-      - "127.0.0.1:8787:8787"
+    # runner_net is internal, so the runner has no route out and Docker will not
+    # publish a host port for it. The app reaches it at http://runner:8787 by
+    # joining runner_net itself. For host-based development, run
+    # `npm run runner:service` instead of this file.
     networks:
       - runner_net
     read_only: true
@@ -17,7 +19,8 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 32
-    mem_limit: 256m
+    # Two concurrent submissions, each a grader plus one worker capped at 256 MB.
+    mem_limit: 768m
     cpus: 0.5
     restart: unless-stopped
 

@@ -29,7 +29,10 @@ QUEST_CODER_DATABASE_PATH=/durable-volume/quest-coder.sqlite
 NEXT_PUBLIC_SITE_URL=https://<app-host>
 NEXT_PUBLIC_ALLOW_INDEXING=false
 NEXT_PUBLIC_APP_VERSION=<git-sha>
+QUEST_CODER_TRUSTED_PROXY_HOPS=1
 ```
+
+Set `QUEST_CODER_TRUSTED_PROXY_HOPS` to the number of proxies you run in front of the app (1 for a single load balancer or platform edge). It enables per-address sign-up limits. Leave it at 0 when the app is reached directly, because the forwarded header is then caller controlled.
 
 Never put the runner token or database credentials in a `NEXT_PUBLIC_*` variable.
 
@@ -37,7 +40,7 @@ Use `npm ci`, not `npm install`, for reproducible deployment from the lockfile.
 
 ## Runner deployment
 
-Build from `runner/service/Dockerfile`. `compose.yaml` demonstrates a read-only container, non-root user, dropped capabilities, no-new-privileges, PID/memory/CPU limits, and a bounded tmpfs.
+Build from `runner/service/Dockerfile`. `compose.yaml` demonstrates a read-only container, non-root user, dropped capabilities, no-new-privileges, PID/memory/CPU limits, a bounded tmpfs, and an internal network with no route out. Because that network is internal, the runner has no published host port: the app must join `runner_net` and use `http://runner:8787`. The compose file has not been exercised in CI.
 
 Before public traffic, the runner host must additionally enforce:
 
@@ -52,7 +55,7 @@ The Python AST restrictions remain defense-in-depth; they are not the isolation 
 
 ## Persistence
 
-Anonymous sessions use an opaque random token stored in an HttpOnly, SameSite=Lax cookie. Only its SHA-256 hash is stored. Progress is stored server-side in SQLite and mirrored to localStorage as a migration/offline fallback.
+Anonymous sessions use an opaque random token stored in an HttpOnly, SameSite=Lax cookie. Only its SHA-256 hash is stored. Progress is stored server-side in SQLite, which is the only copy. Logging out keeps the save; signing in again on the same browser resumes it. Sessions idle for more than 400 days are deleted.
 
 Do not use SQLite on Vercel's ephemeral filesystem for a multi-instance deployment. Either:
 
@@ -63,9 +66,10 @@ Do not use SQLite on Vercel's ephemeral filesystem for a multi-instance deployme
 
 ```bash
 npm ci
-npm run typecheck
+npm run lint
+npm run test:packs
+npm run test:unit
 npm run test:runner
-npm run build
 npx playwright install chromium
 npm run test:e2e
 npm audit --omit=dev

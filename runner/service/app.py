@@ -7,6 +7,7 @@ for the worker and provider-level CPU/memory/process limits.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import subprocess
@@ -21,7 +22,15 @@ HOST = os.environ.get("QUEST_CODER_RUNNER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("QUEST_CODER_RUNNER_PORT", "8787"))
 MAX_BODY = 24_000 + 1024
 MAX_OUTPUT = 1_000_000
+# Backstop only: the CLI enforces its own 5.5s whole-submission deadline and
+# returns a classified result before this fires.
 TIMEOUT_SECONDS = 7
+HIDDEN_ERROR_MESSAGES = {
+    "compile_error": "The code did not compile.",
+    "runtime_error": "The code raised an error on a hidden case.",
+    "loop_guard": "The code did not finish in time on a hidden case.",
+    "off_end_read": "The code read outside a list on a hidden case.",
+}
 ALLOWED_PACK = "forest-of-patience-climbing-stairs"
 ALLOWED_CHALLENGES = {
     "patience-last-jump", "patience-route-scroll", "patience-two-slot-pouch", "boss-old-bramblehorn"
@@ -69,7 +78,8 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(500, {"error": "runner service failed", "code": "runner_error"})
 
     def authorized(self):
-        return bool(TOKEN) and self.headers.get("authorization") == f"Bearer {TOKEN}"
+        supplied = self.headers.get("authorization") or ""
+        return bool(TOKEN) and hmac.compare_digest(supplied.encode(), f"Bearer {TOKEN}".encode())
 
     def reply(self, status, payload):
         body = json.dumps(payload, separators=(",", ":")).encode()
@@ -107,12 +117,18 @@ def redact_hidden_cases(result, mode):
     for index, case in enumerate(result.get("cases", []), 1):
         cases.append({
             "caseId": f"hidden-{index}", "status": case.get("status"), "passed": case.get("passed"),
-            "expected": None, "actual": None, "arguments": {}, "error": case.get("error"),
+            "expected": None, "actual": None, "arguments": {}, "error": redact_hidden_error(case.get("error")),
             "budget": case.get("budget"), "summary": case.get("summary"), "input": None, "events": []
         })
     safe["cases"] = cases
     # Replay is a deliberately public visualization fixture, not a hidden submit row.
     return safe
+
+def redact_hidden_error(error):
+    """Error text is produced by submitted code, so it could echo hidden inputs. Keep only the kind."""
+    if not isinstance(error, dict): return None
+    kind = error.get("kind")
+    return {"kind": kind, "message": HIDDEN_ERROR_MESSAGES.get(kind, "The code failed on a hidden case.")}
 
 if __name__ == "__main__":
     if not TOKEN:

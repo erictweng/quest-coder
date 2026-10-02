@@ -58,11 +58,15 @@ type RunResult = {
   cases: ReplayCase[];
   replay: ReplayCase | null;
   limits: { maxEvents: number; maxDurationMs: number; maxReads?: number };
-  queue?: { activeRuns: number; queuedRuns: number; maxConcurrentRuns: number };
-  security?: { profile: string; network: string; filesystem: string; timelineRetention: string };
+  security?: { profile: string; grading: string; fallback: string };
 };
+/** State only the server can change. Run and action responses return it so the client never computes it. */
+type ServerOwned = Pick<ProgressState, "cleared" | "solutionOpened" | "hintsOpened" | "reviews" | "rewards">;
+type RunResponse = RunResult & { reward: RewardGrant | null; progress: ServerOwned };
+/** Hint text and solutions the server has released for this player, keyed by challenge id. */
+type Revealed = { hints: Record<string, string[]>; solutions: Record<string, string> };
 
-type Hint = { id: string; text: string; cost: string };
+type Hint = { id: string; cost: string };
 type ProblemExample = { input: string; output: string; explanation: string };
 type ProblemPrompt = { statement: string; gamifiedStatement: string; inputs: string[]; output: string; guarantees: string[]; examples: ProblemExample[] };
 type ReviewVariant = { id: string; title: string; mutation: string };
@@ -76,6 +80,7 @@ type Pack = {
   quests: BaseChallenge[];
   boss: BaseChallenge;
   review?: PackReview;
+  rewards?: { xp?: { solutionAssistedMultiplier?: number; hintAssistedMultiplier?: number } };
 };
 type BaseChallenge = {
   id: string;
@@ -83,7 +88,6 @@ type BaseChallenge = {
   title: string;
   brief: string;
   starterCode: string;
-  solution: { code: string };
   problem?: ProblemPrompt;
   hints?: Hint[];
   unlock: { requiresQuestIds: string[]; requiresPassed: boolean };
@@ -114,7 +118,7 @@ type RewardWallet = { xp: number; shards: number; grants: RewardGrant[]; shopPre
 type AppSurface = "hub" | "profile" | "campaigns" | "campaignDetail" | "questions" | "solve";
 type QuestionFilter = "All" | "Available" | "Cleared" | "Review" | "Boss";
 type SolveTab = "Question" | "Animation" | "Hints" | "Solution" | "Submissions";
-type Friend = { id: string; name: string; status: string; rating: number };
+const SOLVE_TABS: SolveTab[] = ["Question", "Animation", "Hints", "Solution", "Submissions"];
 type ProgressState = {
   cleared: Record<string, boolean>;
   solutionOpened: Record<string, boolean>;
@@ -140,8 +144,12 @@ const CHALLENGES: Challenge[] = PACKS.flatMap((pack) => [...pack.quests, pack.bo
 const CHALLENGE_BY_ID = Object.fromEntries(CHALLENGES.map((challenge) => [challenge.id, challenge]));
 const PLAY_SPEEDS = [0.5, 1, 2, 4];
 const EMPTY_REWARDS: RewardWallet = { xp: 0, shards: 0, grants: [], shopPreviewUnlocked: false };
+const EMPTY_REVEALED: Revealed = { hints: {}, solutions: {} };
+const SESSION_NAME_KEY = "quest-coder:session";
+const SIGNED_OUT_KEY = "quest-coder:signed-out";
+const SAVE_DEBOUNCE_MS = 400;
+const LOCKED_REASON = "Clear the previous quest with Submit all first";
 const EMPTY_PROGRESS: ProgressState = { cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false };
-const FRIEND_SHELL: Friend[] = [{ id: "zoro", name: "Zoro", status: "drilling arrays", rating: 1050 }, { id: "steve", name: "Steve", status: "polishing quests", rating: 990 }];
 
 const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string }> = {
   passed: { title: "passed:", visual: "gold relic glow", tone: "text-emerald-200 bg-emerald-500/15 border-emerald-300/40" },
@@ -156,20 +164,25 @@ const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string
 
 export default function Home() {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [userNameDraft, setUserNameDraft] = useState("Eric");
+  const gutterRef = useRef<HTMLPreElement | null>(null);
+  const [userNameDraft, setUserNameDraft] = useState("");
   const [userName, setUserName] = useState<string | null>(null);
-  const [serverBacked, setServerBacked] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState>(EMPTY_PROGRESS);
+  const [revealed, setRevealed] = useState<Revealed>(EMPTY_REVEALED);
   const [surface, setSurface] = useState<AppSurface>("hub");
   const [selectedPackSlug, setSelectedPackSlug] = useState(DEFAULT_PACK.slug);
   const [questionFilter, setQuestionFilter] = useState<QuestionFilter>("All");
   const [solveTab, setSolveTab] = useState<SolveTab>("Question");
   const [questNotebookOpen, setQuestNotebookOpen] = useState(false);
   const [solutionConfirmOpen, setSolutionConfirmOpen] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [activeId, setActiveId] = useState(DEFAULT_PACK.quests[0]?.id ?? DEFAULT_PACK.boss.id);
   const activeChallenge = useMemo(() => CHALLENGES.find((challenge) => challenge.id === activeId) ?? CHALLENGES[0], [activeId]);
   const [code, setCode] = useState(activeChallenge.starterCode);
   const [result, setResult] = useState<RunResult | null>(null);
+  // The source that produced `result`, so the line trace still matches after the editor changes.
+  const [ranSource, setRanSource] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -178,7 +191,6 @@ export default function Home() {
   const [recentReward, setRecentReward] = useState<RewardGrant | null>(null);
   const [passMoment, setPassMoment] = useState(false);
 
-  const storageKey = userName ? `quest-coder:profile:${userName}` : null;
   const replay = result?.replay ?? null;
   const events = replay?.events ?? [];
   const activeEvent = events[Math.min(cursor, Math.max(events.length - 1, 0))];
@@ -189,7 +201,6 @@ export default function Home() {
   const activeAttempts = progress.attempts[activeChallenge.id] ?? [];
   const reviewItems = useMemo(() => buildReviewItems(progress), [progress]);
   const dueReviews = reviewItems.filter((item) => item.isDue && !item.isSnoozed);
-  const eligibleSurprises = reviewItems.filter((item) => item.studied);
   const topicStats = useMemo(() => buildTopicStats(progress), [progress]);
   const statBar = useMemo(() => buildStatBar(progress), [progress]);
   const activePack = PACK_BY_SLUG[activeChallenge.packSlug];
@@ -203,58 +214,63 @@ export default function Home() {
     return activePath[index + 1] ? CHALLENGE_BY_ID[activePath[index + 1].id] : null;
   }, [activePath, activeChallenge.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await fetch("/api/session", { cache: "no-store" });
-        const session = await response.json() as { authenticated?: boolean; displayName?: string };
-        if (cancelled || !session.authenticated || !session.displayName) {
-          const savedUser = safeLocalStorageGet("quest-coder:session");
-          if (savedUser && !cancelled) setUserNameDraft(savedUser);
-          return;
-        }
-        const progressResponse = await fetch("/api/progress", { cache: "no-store" });
-        const saved = progressResponse.ok ? (await progressResponse.json() as { progress?: unknown }).progress : null;
-        if (cancelled) return;
-        setUserName(session.displayName);
-        setUserNameDraft(session.displayName);
-        setProgress(normalizeProgress(saved));
-        setServerBacked(true);
-      } catch {
-        const savedUser = safeLocalStorageGet("quest-coder:session");
-        if (savedUser && !cancelled) {
-          setUserName(savedUser);
-          setUserNameDraft(savedUser);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
   const activeChallengeRef = useRef(activeChallenge);
   activeChallengeRef.current = activeChallenge;
 
-  useEffect(() => {
-    if (!storageKey || serverBacked) return;
-    const stored = readProgress(storageKey);
-    setProgress(stored);
-    // Restore the saved draft for the open challenge; without this the starter code written on mount
-    // would be saved back over the player's draft as soon as the profile loaded.
+  /** Adopts the server's save file, including the draft for the open challenge. */
+  const applySave = useCallback((displayName: string, saved: unknown, released: Revealed | undefined) => {
+    const loaded = normalizeProgress(saved);
     const challenge = activeChallengeRef.current;
-    setCode(stored.savedCode[challenge.id] ?? challenge.starterCode);
-  }, [storageKey, serverBacked]);
+    setUserName(displayName);
+    setUserNameDraft(displayName);
+    setProgress(loaded);
+    setRevealed(released ?? EMPTY_REVEALED);
+    // Set the editor in the same render as the progress, so the draft autosave below
+    // never sees starter code next to a loaded profile and writes it over the draft.
+    setCode(loaded.savedCode[challenge.id] ?? challenge.starterCode);
+  }, []);
 
   useEffect(() => {
-    if (!storageKey) return;
-    writeProgress(storageKey, progress);
-    if (serverBacked) {
-      const timer = window.setTimeout(() => {
-        void fetch("/api/progress", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ progress }) });
-      }, 150);
-      return () => window.clearTimeout(timer);
-    }
-  }, [progress, storageKey, serverBacked]);
+    let cancelled = false;
+    const lastName = safeLocalStorageGet(SESSION_NAME_KEY);
+    if (lastName) setUserNameDraft(lastName);
+    // Logging out keeps the server save and its cookie; this flag only stops the auto-resume.
+    if (safeLocalStorageGet(SIGNED_OUT_KEY)) return;
+    void (async () => {
+      try {
+        const session = await (await fetch("/api/session", { cache: "no-store" })).json() as { authenticated?: boolean; displayName?: string };
+        if (cancelled || !session.authenticated || !session.displayName) return;
+        const response = await fetch("/api/progress", { cache: "no-store" });
+        if (!response.ok || cancelled) return;
+        const saved = await response.json() as { progress?: unknown; revealed?: Revealed };
+        if (!cancelled) applySave(session.displayName, saved.progress, saved.revealed);
+      } catch {
+        if (!cancelled) setSessionError("Could not reach the server. Sign in to retry.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [applySave]);
+
+  // Drafts, attempts and preferences are the only state the client writes; the server ignores the rest.
+  const { attempts, savedCode, friendsEnabled } = progress;
+  const unsavedRef = useRef<string | null>(null);
+  /** Sends any pending save now. `keepalive` lets it finish while the page is closing. */
+  const flushSave = useCallback(() => {
+    const body = unsavedRef.current;
+    if (body === null) return;
+    unsavedRef.current = null;
+    void fetch("/api/progress", { method: "PUT", headers: { "content-type": "application/json" }, body, keepalive: true }).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (!userName) return;
+    unsavedRef.current = JSON.stringify({ progress: { attempts, savedCode, friendsEnabled } });
+    const timer = window.setTimeout(flushSave, SAVE_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [attempts, savedCode, friendsEnabled, userName, flushSave]);
+  useEffect(() => {
+    window.addEventListener("pagehide", flushSave);
+    return () => window.removeEventListener("pagehide", flushSave);
+  }, [flushSave]);
 
   useEffect(() => {
     setCode(progress.savedCode[activeChallenge.id] ?? activeChallenge.starterCode);
@@ -264,9 +280,9 @@ export default function Home() {
   }, [activeChallenge.id]);
 
   useEffect(() => {
-    if (!storageKey) return;
+    if (!userName) return;
     setProgress((current) => current.savedCode[activeChallenge.id] === code ? current : ({ ...current, savedCode: { ...current.savedCode, [activeChallenge.id]: code } }));
-  }, [activeChallenge.id, code, storageKey]);
+  }, [activeChallenge.id, code, userName]);
 
   const submit = useCallback(async (mode: "run" | "submit" = "run") => {
     if (isActiveLocked) {
@@ -286,29 +302,43 @@ export default function Home() {
       solutionAssisted: Boolean(progress.solutionOpened[activeChallenge.id]),
       hintCount: progress.hintsOpened[activeChallenge.id] ?? 0
     };
+    // The player may switch quests while this runs; only show the outcome on the quest it belongs to.
+    const stillOnThisQuest = () => activeChallengeRef.current.id === context.challengeId;
     try {
       const response = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: code, ...context })
+        body: JSON.stringify({ source: code, challengeId: context.challengeId, packSlug: context.packSlug, mode })
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Runner request failed");
-      const runResult = payload as RunResult;
-      setResult(runResult);
-      setCursor(0);
-      if (runResult.passed && mode === "submit") {
-        setPassMoment(true);
-        window.setTimeout(() => setPassMoment(false), 1800);
+      if (response.status === 401) {
+        // The server no longer knows this session; stop presenting the profile as signed in.
+        setUserName(null);
+        setSessionError("Your session ended. Sign in again to keep going.");
+        return;
       }
-      recordAttempt(runResult, attemptFromResult(runResult, context));
+      if (!response.ok) throw new Error(payload.error ?? "Runner request failed");
+      const runResult = payload as RunResponse;
+      if (stillOnThisQuest()) {
+        setResult(runResult);
+        setRanSource(code);
+        setCursor(0);
+        if (runResult.passed && mode === "submit") {
+          setPassMoment(true);
+          window.setTimeout(() => setPassMoment(false), 1800);
+        }
+        setRecentReward(runResult.reward);
+      }
+      recordAttempt(attemptFromResult(runResult, context), runResult.progress);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown run error";
-      setRunError(message);
-      setResult(null);
+      if (stillOnThisQuest()) {
+        setRunError(message);
+        setResult(null);
+      }
       // A failed bridge call is still an attempt the player made; keep it in the history so the
       // Submissions tab never silently stays empty after Run basic / Submit all.
-      recordAttempt(null, attemptFromFailure(message, context));
+      recordAttempt(attemptFromFailure(message, context));
     } finally {
       setIsRunning(false);
     }
@@ -329,50 +359,54 @@ export default function Home() {
   }, [events.length, playing, speed]);
 
   async function signIn() {
-    const normalized = userNameDraft.trim() || "Eric";
-    const local = readProgress(`quest-coder:profile:${normalized}`);
+    const displayName = userNameDraft.trim();
+    if (!displayName) {
+      setSessionError("Enter a name to sign in.");
+      return;
+    }
+    setSessionError(null);
     try {
-      const response = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: normalized }) });
-      if (!response.ok) throw new Error("session unavailable");
-      safeLocalStorageSet("quest-coder:session", normalized);
-      setUserName(normalized);
-      setProgress(local);
-      setServerBacked(true);
-    } catch {
-      safeLocalStorageSet("quest-coder:session", normalized);
-      setUserName(normalized);
-      setProgress(local);
-      setServerBacked(false);
+      const response = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName }) });
+      const session = await response.json() as { displayName?: string; progress?: unknown; revealed?: Revealed; error?: string };
+      if (!response.ok) throw new Error(session.error ?? "Sign-in failed.");
+      safeLocalStorageSet(SESSION_NAME_KEY, displayName);
+      safeLocalStorageRemove(SIGNED_OUT_KEY);
+      applySave(session.displayName ?? displayName, session.progress, session.revealed);
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : "Could not reach the server. Try again.");
     }
   }
 
-  async function signOut() {
-    if (serverBacked) await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
-    safeLocalStorageRemove("quest-coder:session");
-    setServerBacked(false);
+  /** Hides the profile on this browser. The save stays on the server and resumes at the next sign-in. */
+  function signOut() {
+    flushSave();
+    safeLocalStorageSet(SIGNED_OUT_KEY, "1");
     setUserName(null);
     setProgress(EMPTY_PROGRESS);
+    setRevealed(EMPTY_REVEALED);
+    setCode(activeChallenge.starterCode);
     setResult(null);
+    setRunError(null);
     setRecentReward(null);
     setPassMoment(false);
   }
 
-  function recordAttempt(runResult: RunResult | null, attempt: Attempt) {
-    const { solutionAssisted, hintCount } = attempt;
-    const authoritativeClear = attempt.mode === "submit" && attempt.passed;
-    setProgress((current) => {
-      const next: ProgressState = {
-        ...current,
-        cleared: { ...current.cleared, [activeChallenge.id]: current.cleared[activeChallenge.id] || authoritativeClear },
-        attempts: appendAttempt(current.attempts, attempt)
-      };
-      if (authoritativeClear && runResult && !current.cleared[activeChallenge.id]) {
-        next.rewards = grantReward(current, activeChallenge, solutionAssisted, hintCount);
-        setRecentReward(next.rewards.grants[0] ?? null);
-      }
-      if (authoritativeClear && runResult && activeChallenge.isBoss) next.reviews = scheduleReview(current, activeChallenge, runResult, solutionAssisted, hintCount);
-      return next;
-    });
+  function recordAttempt(attempt: Attempt, serverOwned?: ServerOwned) {
+    setProgress((current) => ({ ...current, ...serverOwned, attempts: appendAttempt(current.attempts, attempt) }));
+  }
+
+  /** Asks the server to change server-owned state, then adopts what it returns. */
+  async function progressAction(action: "open_hint" | "open_solution" | "unlock_shop_preview", challengeId?: string) {
+    try {
+      const response = await fetch("/api/progress", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, challengeId }) });
+      const payload = await response.json() as { progress?: unknown; revealed?: Revealed; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Could not save that action.");
+      const { cleared, solutionOpened, hintsOpened, reviews, rewards } = normalizeProgress(payload.progress);
+      setProgress((current) => ({ ...current, cleared, solutionOpened, hintsOpened, reviews, rewards }));
+      setRevealed(payload.revealed ?? EMPTY_REVEALED);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : "Could not save that action.");
+    }
   }
 
   function applyEditorEdit(edit: EditorEdit) {
@@ -382,30 +416,6 @@ export default function Home() {
       if (!element) return;
       element.focus();
       element.setSelectionRange(edit.selectionStart, edit.selectionEnd);
-    });
-  }
-
-  function openSolution() {
-    setProgress((current) => ({ ...current, solutionOpened: { ...current.solutionOpened, [activeChallenge.id]: true } }));
-  }
-
-  function openHint() {
-    setProgress((current) => ({ ...current, hintsOpened: { ...current.hintsOpened, [activeChallenge.id]: (current.hintsOpened[activeChallenge.id] ?? 0) + 1 } }));
-  }
-
-  function unlockShopPreview() {
-    setProgress((current) => current.rewards.shards < 1 || current.rewards.shopPreviewUnlocked ? current : ({ ...current, rewards: { ...current.rewards, shards: current.rewards.shards - 1, shopPreviewUnlocked: true } }));
-  }
-
-  function toggleFriends() {
-    setProgress((current) => ({ ...current, friendsEnabled: !current.friendsEnabled }));
-  }
-
-  function snoozeReview(packSlug: string) {
-    setProgress((current) => {
-      const existing = current.reviews[packSlug];
-      if (!existing) return current;
-      return { ...current, reviews: { ...current.reviews, [packSlug]: { ...existing, snoozedUntil: addDays(new Date(), 1).toISOString() } } };
     });
   }
 
@@ -423,6 +433,7 @@ export default function Home() {
     setSurface("solve");
     setQuestNotebookOpen(false);
     setSolutionConfirmOpen(false);
+    setResetConfirmOpen(false);
     setRecentReward(null);
     setPassMoment(false);
     setRunError(null);
@@ -435,20 +446,6 @@ export default function Home() {
       return;
     }
     selectChallenge(nextChallenge.id);
-  }
-
-  function startReview(item: ReviewItem) {
-    selectChallenge(item.record.bossId);
-    setRunError(`Review preview: ${item.variant?.title ?? "boss replay"}. ${item.variant?.mutation ?? "Run the boss again to reinforce it."}`);
-  }
-
-  function startSurprise() {
-    const choice = dueReviews[0] ?? eligibleSurprises[0];
-    if (!choice) {
-      setRunError("No studied topics are eligible yet. Beat a boss first.");
-      return;
-    }
-    startReview(choice);
   }
 
   function handleEditorKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -501,21 +498,21 @@ export default function Home() {
                 <StatusPill label={result?.execution.mode ? `${result.execution.mode} · ${result.cases.length} cases` : "compiler ready"} tone={result?.passed ? "green" : "cyan"} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={signOut}>Log out</button></> : <><input className="w-24 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} onChange={(event) => setUserNameDraft(event.target.value)} aria-label="User name" /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950" onClick={signIn}>Sign in</button></>}
+                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={signOut}>Log out</button></> : <><input className="w-24 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} placeholder="Your name" onChange={(event) => setUserNameDraft(event.target.value)} aria-label="User name" /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950" onClick={signIn}>Sign in</button></>}
               </div>
             </div>
           ) : (
             <>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder · Sprint 15.6 Cyberpunk Bit</p><span className="sr-only">Quest Coder · Sprint 2 Replay Theater Question + code editor Line numbers Open solution scroll {"onSelect={selectChallenge}"}</span>
+                  <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Quest Coder</p>
                   <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">Choose your node path</h1><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">Boot the Cyberpunk Bit terminal: choose Profile, Campaign, or Questions, then open the compiler when the quest starts.</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
                   {userName ? (
                     <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-300">Signed in as <b className="text-cyan-200">{userName}</b></span><button className="control" onClick={signOut}>Log out</button></div>
                   ) : (
-                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} onChange={(event) => setUserNameDraft(event.target.value)} aria-label="User name" /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950" onClick={signIn}>Sign in</button></div>
+                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} placeholder="Your name" onChange={(event) => setUserNameDraft(event.target.value)} aria-label="User name" /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950" onClick={signIn}>Sign in</button></div>
                   )}
                 </div>
               </div>
@@ -526,12 +523,10 @@ export default function Home() {
                 <button className={surface === "questions" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("questions")}>Questions</button>
                 <button className="control" onClick={() => setSurface("solve")}>Solve</button>
               </nav>
-              <div className="mt-4 grid gap-2 text-sm sm:grid-cols-5">
-                <Metric label="Surface" value={surface} />
+              <div className="mt-4 grid gap-2 text-sm sm:grid-cols-4">
                 <Metric label="Streak/rating" value={`${topicStats[0]?.streak ?? 0}/${topicStats[0]?.rating ?? 1000}`} />
                 <Metric label="Bosses defeated" value={statBar.label} />
                 <Metric label="Active quest" value={activeChallenge.title} />
-                <Metric label="Queue" value={`${result?.queue?.activeRuns ?? 0}/${result?.queue?.maxConcurrentRuns ?? 2} active`} />
                 <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
                 <Metric label="Reviews due" value={`${dueReviews.length}`} />
                 <Metric label="XP" value={`${progress.rewards.xp}`} />
@@ -540,14 +535,13 @@ export default function Home() {
               <StatBar stat={statBar} />
             </>
           )}
-          <span className="sr-only">Public signup/onboarding enter a handle public-hardening-v0 capped replay metadata</span>
+          {sessionError ? <p className="mt-2 text-xs text-rose-200" role="alert">{sessionError}</p> : null}
         </header>
 
         {surface === "hub" ? (
           <section className="space-y-5">
-            <span className="sr-only">Quest map Quest board Pixel companion Pick a path first Streak/rating Bosses defeated Reviews due XP Shards Save file Cyberpunk Bit Hub Arcade Terminal</span>
             <div className="pixel-dialogue terminal-card rounded-3xl p-5 shadow-xl">
-              <div className="flex items-start gap-4"><img className="cyber-asset bit-sprite h-14 w-14 border border-cyan-300/30 bg-slate-950 p-1" src="/art/cyberpunk-bit/operator.svg" alt="" aria-hidden="true" /><div><h2 className="text-xl font-black text-[var(--qc-pac-yellow)]">Pixel operator</h2><p className="mt-1 text-slate-200">“Pick a maze node first. I’ll open the compiler when the quest starts.”</p><p className="mt-2 text-xs uppercase tracking-[0.25em] text-cyan-200">Cyberpunk Bit Hub Arcade Terminal</p></div></div>
+              <div className="flex items-start gap-4"><img className="cyber-asset bit-sprite h-14 w-14 border border-cyan-300/30 bg-slate-950 p-1" src="/art/cyberpunk-bit/operator.svg" alt="" aria-hidden="true" /><div><h2 className="text-xl font-black text-[var(--qc-pac-yellow)]">Pixel operator</h2><p className="mt-1 text-slate-200">“Pick a maze node first. I’ll open the compiler when the quest starts.”</p></div></div>
             </div>
             <div className="grid gap-4 lg:grid-cols-3">
               <button className="neon-maze-panel pixel-button rounded-3xl p-6 text-left shadow-xl hover:bg-cyan-300/10" onClick={() => setSurface("profile")}>
@@ -565,45 +559,44 @@ export default function Home() {
         ) : surface === "profile" ? (
           <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
             <div className="rounded-3xl border border-cyan-300/20 bg-slate-950/80 p-5"><h2 className="text-2xl font-black">Profile save file</h2><p className="mt-2 text-slate-300">{userName ?? "Guest"} · {progress.rewards.xp} XP · {progress.rewards.shards} Shards · {dueReviews.length} reviews due</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><Metric label="Bosses defeated" value={statBar.label} /><Metric label="Attempts logged" value={`${Object.values(progress.attempts).flat().length}`} /></div><div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3"><h3 className="font-bold">Recent attempts</h3><div className="mt-2 space-y-2 text-xs">{Object.values(progress.attempts).flat().slice(0, 4).length ? Object.values(progress.attempts).flat().slice(0, 4).map((attempt) => <p key={attempt.id} className="rounded-xl bg-slate-950/70 p-2">{attempt.challengeId} · {attempt.status} · {attempt.solutionAssisted ? "solution-assisted" : "unassisted"}</p>) : <p className="text-slate-400">No attempts logged yet.</p>}</div></div><div className="mt-4 rounded-2xl border border-purple-300/20 bg-purple-300/5 p-3"><h3 className="font-bold">Review reminders</h3><p className="mt-1 text-sm text-slate-300">{dueReviews.length ? `${dueReviews.length} rematch queued.` : "No reviews due. Beat a boss to start spaced rematches."}</p></div></div>
-            <div className="space-y-4"><RewardPanel rewards={progress.rewards} onSpend={unlockShopPreview} /><FriendPanel enabled={progress.friendsEnabled} onToggle={toggleFriends} friends={FRIEND_SHELL} /></div>
+            <div className="space-y-4"><RewardPanel rewards={progress.rewards} onSpend={() => void progressAction("unlock_shop_preview")} /></div>
           </section>
         ) : surface === "campaigns" ? (
           <section className="grid gap-4 lg:grid-cols-2">
-            <span className="sr-only">Campaign world Campaign district firewall locked firewall open boss locked boss open</span>
             {PACKS.map((pack) => { const cleared = [...pack.quests, pack.boss].filter((challenge) => progress.cleared[challenge.id]).length; const total = pack.quests.length + 1; const bossOpen = pack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]); const reviewDue = dueReviews.some((item) => item.pack.slug === pack.slug); return <button key={pack.slug} className="neon-maze-panel rounded-3xl p-5 text-left hover:bg-purple-300/10" onClick={() => openCampaign(pack.slug)}><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.3em] text-purple-300">Neon district</p><h2 className="mt-2 text-2xl font-black">{pack.title}</h2></div><div className="power-node cyber-asset-soft grid h-12 w-12 place-items-center border border-cyan-200/30 bg-cyan-300/10 p-1" aria-hidden="true"><img className="cyber-asset h-8 w-8" src="/art/cyberpunk-bit/glitch-patrol.svg" alt="" /></div></div><p className="mt-2 text-sm text-slate-300">{pack.metadata.shortDescription}</p><div className="mt-4 flex flex-wrap gap-2 text-xs"><StatusPill label={`${cleared}/${total} cleared`} tone="cyan" /><StatusPill label={bossOpen ? "firewall open" : "firewall locked"} tone={bossOpen ? "gold" : "muted"} />{reviewDue ? <StatusPill label="review due" tone="purple" /> : null}</div><p className="mt-3 text-xs text-slate-400">Concepts: {pack.concepts.join(" · ")}</p></button>; })}
           </section>
         ) : surface === "campaignDetail" ? (
-          <section className="neon-maze-panel rounded-3xl p-5"><span className="sr-only">Campaign detail Quest node Boss node Cyberpunk neon maze district Pellet route Firewall gate gate locked gate open</span><div className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs uppercase tracking-[0.3em] text-purple-300">Neon maze route</p><h2 className="mt-2 text-3xl font-black">{selectedPack.title}</h2><p className="mt-2 max-w-3xl text-sm text-slate-300">{selectedPack.metadata.shortDescription}</p><div className="mt-3 flex flex-wrap gap-2 text-xs">{selectedPack.concepts.map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></div><button className="control" onClick={() => setSurface("campaigns")}>Back to campaigns</button></div><div className="grid gap-3 md:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">{[...selectedPack.quests, selectedPack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isBoss = challenge.id === selectedPack.boss.id; const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = cleared ? "cleared" : reviewDue ? "review due" : locked ? "locked" : isBoss ? "boss" : "available"; return <button key={challenge.id} className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${isBoss ? "firewall-gate" : "terminal-card"}`} onClick={() => selectChallenge(challenge.id)}><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.25em] text-slate-400">{isBoss ? "Firewall gate" : `Pellet node ${challenge.order ?? ""}`}</p><h3 className="mt-2 font-bold">{challenge.title}</h3></div><div className={`cyber-asset-soft grid h-9 w-9 place-items-center border p-1 ${isBoss ? "firewall-gate" : "pellet-node border-yellow-200/30 bg-yellow-300/10"}`} aria-hidden="true"><img className="cyber-asset h-6 w-6" src={isBoss ? "/art/cyberpunk-bit/firewall-gate.svg" : "/art/cyberpunk-bit/pellet-node.svg"} alt="" /></div></div><p className="mt-2 text-xs text-slate-400">{challenge.brief}</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={cleared ? "green" : reviewDue ? "purple" : locked ? "muted" : isBoss ? "pink" : "cyan"} />{isBoss ? <StatusPill label={locked ? "firewall locked" : "firewall open"} tone={locked ? "muted" : "gold"} /> : null}</div></button>; })}</div></section>
+          <section className="neon-maze-panel rounded-3xl p-5"><div className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs uppercase tracking-[0.3em] text-purple-300">Neon maze route</p><h2 className="mt-2 text-3xl font-black">{selectedPack.title}</h2><p className="mt-2 max-w-3xl text-sm text-slate-300">{selectedPack.metadata.shortDescription}</p><div className="mt-3 flex flex-wrap gap-2 text-xs">{selectedPack.concepts.map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></div><button className="control" onClick={() => setSurface("campaigns")}>Back to campaigns</button></div><div className="grid gap-3 md:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">{[...selectedPack.quests, selectedPack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isBoss = challenge.id === selectedPack.boss.id; const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = reviewDue ? "review due" : cleared ? "cleared" : locked ? "locked" : isBoss ? "boss" : "available"; return <button key={challenge.id} className={`rounded-2xl border p-4 text-left transition ${locked ? "cursor-not-allowed opacity-60" : "hover:-translate-y-0.5"} ${isBoss ? "firewall-gate" : "terminal-card"}`} onClick={() => selectChallenge(challenge.id)} disabled={locked} title={locked ? LOCKED_REASON : undefined}><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.25em] text-slate-400">{isBoss ? "Firewall gate" : `Pellet node ${challenge.order ?? ""}`}</p><h3 className="mt-2 font-bold">{challenge.title}</h3></div><div className={`cyber-asset-soft grid h-9 w-9 place-items-center border p-1 ${isBoss ? "firewall-gate" : "pellet-node border-yellow-200/30 bg-yellow-300/10"}`} aria-hidden="true"><img className="cyber-asset h-6 w-6" src={isBoss ? "/art/cyberpunk-bit/firewall-gate.svg" : "/art/cyberpunk-bit/pellet-node.svg"} alt="" /></div></div><p className="mt-2 text-xs text-slate-400">{challenge.brief}</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={reviewDue ? "purple" : cleared ? "green" : locked ? "muted" : isBoss ? "pink" : "cyan"} />{isBoss ? <StatusPill label={locked ? "firewall locked" : "firewall open"} tone={locked ? "muted" : "gold"} /> : null}</div></button>; })}</div></section>
         ) : surface === "questions" ? (
-          <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Questions list</h2><p className="text-sm text-slate-400">Select a question to open the focused solve screen.</p></div><div className="flex flex-wrap gap-2 text-xs">{(["All", "Available", "Cleared", "Review", "Boss"] as QuestionFilter[]).map((filter) => <button key={filter} className={questionFilter === filter ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setQuestionFilter(filter)}>{filter}</button>)}</div></div><div className="grid gap-3 md:grid-cols-2">{CHALLENGES.filter((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); if (questionFilter === "Available") return !locked && !cleared && !challenge.isBoss; if (questionFilter === "Cleared") return cleared; if (questionFilter === "Review") return reviewDue; if (questionFilter === "Boss") return challenge.isBoss; return true; }).map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = cleared ? "cleared" : reviewDue ? "review due" : locked ? "locked" : challenge.isBoss ? "boss" : "available"; return <button key={challenge.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:border-cyan-300" onClick={() => selectChallenge(challenge.id)}><b>{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</b><p className="mt-1 text-xs text-slate-400">{challenge.packTitle} · {(progress.attempts[challenge.id] ?? []).length} attempts</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={cleared ? "green" : reviewDue ? "purple" : locked ? "muted" : challenge.isBoss ? "pink" : "cyan"} />{challenge.packConcepts.slice(0, 2).map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></button>; })}</div></section>
+          <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Questions list</h2><p className="text-sm text-slate-400">Select a question to open the focused solve screen.</p></div><div className="flex flex-wrap gap-2 text-xs">{(["All", "Available", "Cleared", "Review", "Boss"] as QuestionFilter[]).map((filter) => <button key={filter} className={questionFilter === filter ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setQuestionFilter(filter)}>{filter}</button>)}</div></div><div className="grid gap-3 md:grid-cols-2">{CHALLENGES.filter((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); if (questionFilter === "Available") return !locked && !cleared && !challenge.isBoss; if (questionFilter === "Cleared") return cleared; if (questionFilter === "Review") return reviewDue; if (questionFilter === "Boss") return challenge.isBoss; return true; }).map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = reviewDue ? "review due" : cleared ? "cleared" : locked ? "locked" : challenge.isBoss ? "boss" : "available"; return <button key={challenge.id} className={`rounded-2xl border border-white/10 bg-white/5 p-4 text-left ${locked ? "cursor-not-allowed opacity-60" : "hover:border-cyan-300"}`} onClick={() => selectChallenge(challenge.id)} disabled={locked} title={locked ? LOCKED_REASON : undefined}><b>{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</b><p className="mt-1 text-xs text-slate-400">{challenge.packTitle} · {(progress.attempts[challenge.id] ?? []).length} attempts</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={reviewDue ? "purple" : cleared ? "green" : locked ? "muted" : challenge.isBoss ? "pink" : "cyan"} />{challenge.packConcepts.slice(0, 2).map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></button>; })}</div></section>
         ) : (
           <section className="one-question-workspace relative min-h-[calc(100vh-4rem)]" aria-label="Full-screen compiler workspace">
-            <span className="sr-only">Focused full-screen compiler Quest Notebook bottom right Home top bar run submit split one-question mode confirm before solution</span>
-            <section className="pixel-panel rounded-2xl p-3 shadow-xl" aria-label="Code compiler pane - restrained no decorative clutter near editor">
+            <section className="pixel-panel rounded-2xl p-3 shadow-xl" aria-label="Code editor">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.25em] text-emerald-300">Python compiler · full-screen focus</p>
+                  <p className="text-xs uppercase tracking-[0.25em] text-emerald-300">Python 3</p>
                   <h2 className="text-xl font-black">{activeChallenge.title}</h2>
-                  <p className="text-xs text-slate-400">Run checks basic cases. Submit checks the full suite. Animation uses one configured mid-complex replay.</p>
+                  <p className="text-xs text-slate-400">Run basic checks the example cases. Submit runs the full suite and clears the quest.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setCode(activeChallenge.starterCode)}>Reset</button>
+                  {resetConfirmOpen ? <><span className="self-center text-xs text-amber-100">Replace your code with the starter code?</span><button className="rounded-xl bg-amber-300 px-3 py-2 text-sm font-bold text-slate-950" onClick={() => { setCode(activeChallenge.starterCode); setResetConfirmOpen(false); }}>Reset code</button><button className="control" onClick={() => setResetConfirmOpen(false)}>Keep my code</button></> : <button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setResetConfirmOpen(true)}>Reset</button>}
                   <button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-cyan-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit("run")}>{isRunning ? "Running…" : "Run basic ▶"}</button>
                   <button className="rounded-xl bg-yellow-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-yellow-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit("submit")}>{activeChallenge.isBoss ? "Submit Boss" : "Submit all"}</button>
                 </div>
               </div>
               <div className="rounded-2xl border border-slate-700 bg-slate-950/95 p-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400"><span>solution.py</span><span>Tab/Shift+Tab · Ctrl/Cmd+Enter runs basic cases · solution hidden behind confirmation</span></div>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400"><span>solution.py</span><span>Tab/Shift+Tab indent · Ctrl/Cmd+Enter runs basic cases</span></div>
                 <div className="grid grid-cols-[3rem_1fr] gap-3">
-                  <pre aria-hidden="true" className="select-none text-right font-mono text-sm leading-6 text-slate-500">{lineNumbers(code)}</pre>
-                  <textarea ref={textareaRef} aria-label="Python solution editor" className="min-h-[62vh] resize-y bg-transparent font-mono text-sm leading-6 text-slate-100 outline-none [font-feature-settings:'liga'_0,'calt'_0]" spellCheck={false} value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={handleEditorKeyDown} />
+                  <pre ref={gutterRef} aria-hidden="true" className="select-none overflow-hidden text-right font-mono text-sm leading-6 text-slate-500">{lineNumbers(code)}</pre>
+                  <textarea ref={textareaRef} aria-label="Python solution editor" className="min-h-[62vh] resize-y bg-transparent font-mono text-sm leading-6 text-slate-100 outline-none [font-feature-settings:'liga'_0,'calt'_0]" spellCheck={false} wrap="off" value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={handleEditorKeyDown} onScroll={(event) => { if (gutterRef.current) gutterRef.current.scrollTop = event.currentTarget.scrollTop; }} />
                 </div>
               </div>
               <div className="mt-3 rounded-2xl border border-emerald-300/20 bg-black/40 p-4" aria-label="Console result drawer">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="font-bold">Console / result drawer</h3>
+                  <h3 className="font-bold">Console</h3>
                   <div className="flex flex-wrap items-center gap-2"><StatusPill label={result?.execution.mode ? `${result.execution.mode} suite` : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />{result?.execution.replayCaseId ? <StatusPill label={`animation ${result.execution.replayCaseId}`} tone="purple" /> : null}<button className="control px-3 py-1 text-xs" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Submissions"); }}>Submissions ({activeAttempts.length})</button></div>
                 </div>
+                {!userName ? <p className="mb-3 rounded-xl border border-yellow-300/40 bg-yellow-300/10 p-3 text-sm text-yellow-50" data-testid="signed-out-prompt"><b>Sign in to run code.</b> Enter a name in the top bar; your drafts and clears are saved to that profile.</p> : isActiveLocked ? <p className="mb-3 rounded-xl border border-slate-500/40 bg-slate-500/10 p-3 text-sm text-slate-200">This quest is locked. {LOCKED_REASON}.</p> : null}
                 {runError ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100" role="alert">{runError}</p> : null}
                 {result?.passed && result.execution.mode === "run" ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-300/10 p-3 text-sm text-cyan-50" role="status"><b>Basic checks passed.</b> Submit all to clear this quest and unlock the next stage.</p> : null}
                 {result ? <ResultSummary result={result} onHint={() => { setQuestNotebookOpen(true); setSolveTab("Hints"); }} /> : null}
@@ -625,23 +618,25 @@ export default function Home() {
 
                 <div className="neon-maze-panel mb-4 rounded-2xl p-3" aria-label="Mini quest path">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="text-xs uppercase tracking-[0.25em] text-purple-200">Quest path</p><span className="text-xs text-slate-400">one question at a time</span></div>
-                  <div className="flex flex-wrap gap-2">{[...activePack.quests, activePack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isCurrent = challenge.id === activeChallenge.id; const isBoss = challenge.id === activePack.boss.id; return <button key={challenge.id} className={`pellet-node rounded-xl border px-3 py-2 text-xs font-bold ${isCurrent ? "border-cyan-200 bg-cyan-300 text-slate-950" : cleared ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : locked ? "border-slate-600 bg-slate-800/60 text-slate-400" : isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-100" : "border-white/10 bg-white/5 text-slate-200"}`} onClick={() => { if (!locked) selectChallenge(challenge.id); }} disabled={locked} aria-disabled={locked} title={locked ? "Clear the previous quest with Submit all first" : undefined}>{isBoss ? "Boss" : `Q${challenge.order ?? "?"}`}</button>; })}</div>
+                  <div className="flex flex-wrap gap-2">{[...activePack.quests, activePack.boss].map((challenge) => { const full = CHALLENGE_BY_ID[challenge.id]; const locked = full ? !isUnlocked(full, progress) : false; const cleared = Boolean(progress.cleared[challenge.id]); const isCurrent = challenge.id === activeChallenge.id; const isBoss = challenge.id === activePack.boss.id; return <button key={challenge.id} className={`pellet-node rounded-xl border px-3 py-2 text-xs font-bold ${isCurrent ? "border-cyan-200 bg-cyan-300 text-slate-950" : cleared ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : locked ? "border-slate-600 bg-slate-800/60 text-slate-400" : isBoss ? "border-pink-300/40 bg-pink-300/10 text-pink-100" : "border-white/10 bg-white/5 text-slate-200"}`} onClick={() => { if (!locked) selectChallenge(challenge.id); }} disabled={locked} aria-disabled={locked} title={locked ? LOCKED_REASON : undefined}>{isBoss ? "Boss" : `Q${challenge.order ?? "?"}`}</button>; })}</div>
                 </div>
 
                 <div className="mb-4 flex flex-wrap gap-2 text-xs" role="tablist" aria-label="Quest notebook tabs">
-                  {(["Question", "Animation", "Hints", "Solution", "Submissions"] as SolveTab[]).map((tab) => (
-                    <button key={tab} role="tab" aria-selected={solveTab === tab} className={solveTab === tab ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => { if (tab === "Hints") openHint(); if (tab !== "Solution") setSolutionConfirmOpen(false); setSolveTab(tab); }}>{tab}</button>
+                  {SOLVE_TABS.map((tab) => (
+                    <button key={tab} role="tab" aria-selected={solveTab === tab} className={solveTab === tab ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => { if (tab !== "Solution") setSolutionConfirmOpen(false); setSolveTab(tab); }}>{tab}</button>
                   ))}
                 </div>
 
                 {solveTab === "Question" ? <ProblemDetails challenge={activeChallenge} attempts={activeAttempts.length} helpUsed={progress.hintsOpened[activeChallenge.id] ?? 0} /> : null}
-                {solveTab === "Animation" ? <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3"><OutcomeBadge status={result?.status ?? "internal_error"} passed={result?.passed ?? false} /><p className="rounded-xl border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs text-slate-300">Replay case: {result?.execution.replayCaseId ?? result?.replay?.caseId ?? "run code first"}</p><PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} /></div><SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} /><div className="grid gap-4 lg:grid-cols-2"><CodeTrace code={code} activeLine={activeLine} /><VarsPanel vars={latestVars} event={activeEvent} /></div></div> : null}
-                {solveTab === "Hints" ? <div className="rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-50"><h3 className="font-bold">Hints stay secondary</h3><p className="mt-2">Opened hints: {progress.hintsOpened[activeChallenge.id] ?? 0}</p><p className="mt-3 leading-6">{activeChallenge.hints?.[Math.min((progress.hintsOpened[activeChallenge.id] ?? 1) - 1, (activeChallenge.hints?.length ?? 1) - 1)]?.text ?? "No hint text for this quest yet."}</p><button className="control mt-4" onClick={openHint}>Reveal another hint</button></div> : null}
-                {solveTab === "Solution" ? <SolutionGate revealed={Boolean(progress.solutionOpened[activeChallenge.id])} confirming={solutionConfirmOpen} solution={activeChallenge.solution.code} onAskConfirm={() => setSolutionConfirmOpen(true)} onCancel={() => setSolutionConfirmOpen(false)} onReveal={() => { openSolution(); setSolutionConfirmOpen(false); }} /> : null}
-                {solveTab === "Submissions" ? <div className="space-y-4">{runError ? <p className="rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}<CasesPanel result={result} /><p className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">Attempt history lives here, not on the workspace front. Review reminders stay in Hub/Profile/Campaign.</p><AttemptHistory attempts={activeAttempts} /></div> : null}
+                {solveTab === "Animation" && !replay ? <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300"><h3 className="font-bold text-cyan-100">No replay yet</h3><p className="mt-2">Run basic or Submit all, then come back here to step through one test case line by line.</p></div> : null}
+                {solveTab === "Animation" && replay ? <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3"><OutcomeBadge status={replay.status} passed={replay.passed} /><p className="rounded-xl border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs text-slate-300">Replay case: {result?.execution.replayCaseId ?? result?.replay?.caseId ?? "run code first"}</p><PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} /></div><SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} /><div className="grid gap-4 lg:grid-cols-2"><CodeTrace code={ranSource} activeLine={activeLine} /><VarsPanel vars={latestVars} event={activeEvent} /></div></div> : null}
+                {solveTab === "Hints" ? <HintsPanel opened={revealed.hints[activeChallenge.id] ?? []} total={activeChallenge.hints?.length ?? 0} signedIn={userName !== null} xpShare={activePack.rewards?.xp?.hintAssistedMultiplier ?? 1} onReveal={() => void progressAction("open_hint", activeChallenge.id)} /> : null}
+                {solveTab === "Solution" ? <SolutionGate solution={revealed.solutions[activeChallenge.id]} signedIn={userName !== null} xpShare={activePack.rewards?.xp?.solutionAssistedMultiplier ?? 0.5} confirming={solutionConfirmOpen} onAskConfirm={() => setSolutionConfirmOpen(true)} onCancel={() => setSolutionConfirmOpen(false)} onReveal={() => { void progressAction("open_solution", activeChallenge.id); setSolutionConfirmOpen(false); }} /> : null}
+                {solveTab === "Submissions" ? <div className="space-y-4">{runError ? <p className="rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}<CasesPanel result={result} /><AttemptHistory attempts={activeAttempts} /></div> : null}
               </aside>
             ) : null}
-          </section>        )}
+          </section>
+        )}
       </section>
     </main>
   );
@@ -670,13 +665,27 @@ function ProblemDetails({ challenge, attempts, helpUsed }: { challenge: Challeng
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><h4 className="font-bold text-cyan-100">Output</h4><p className="mt-2 text-sm text-slate-300">{problem.output}</p></div>
     </div>
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><h4 className="font-bold text-cyan-100">Guarantees</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{problem.guarantees.map((item) => <li key={item}>{item}</li>)}</ul></div>
-    <div className="grid gap-3 lg:grid-cols-2">{problem.examples.map((example, index) => <div key={`${example.input}-${index}`} className="rounded-2xl border border-yellow-300/20 bg-yellow-300/5 p-4"><h4 className="font-bold text-yellow-100">Example {index + 1}</h4><pre className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs text-slate-100">Input: {example.input}\nOutput: {example.output}</pre><p className="mt-2 text-sm text-slate-300">{example.explanation}</p></div>)}</div>
+    <div className="grid gap-3 lg:grid-cols-2">{problem.examples.map((example, index) => <div key={`${example.input}-${index}`} className="rounded-2xl border border-yellow-300/20 bg-yellow-300/5 p-4"><h4 className="font-bold text-yellow-100">Example {index + 1}</h4><pre className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs text-slate-100">Input: {example.input}{"\n"}Output: {example.output}</pre><p className="mt-2 text-sm text-slate-300">{example.explanation}</p></div>)}</div>
   </div>;
 }
 
-function SolutionGate({ revealed, confirming, solution, onAskConfirm, onCancel, onReveal }: { revealed: boolean; confirming: boolean; solution: string; onAskConfirm: () => void; onCancel: () => void; onReveal: () => void }) {
-  if (revealed) return <div className="rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4"><h3 className="font-bold text-amber-100">Solution revealed — solution-assisted</h3><pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 font-mono text-xs text-amber-50">{solution}</pre></div>;
-  if (confirming) return <div className="rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-50"><h3 className="font-bold">Reveal solution?</h3><p className="mt-2 leading-6">This will show the reference solution and mark future clears as solution-assisted. Use it only if you want to study the answer.</p><div className="mt-4 flex flex-wrap gap-2"><button className="control" onClick={onCancel}>Cancel</button><button className="rounded-xl bg-amber-300 px-4 py-2 font-bold text-slate-950" onClick={onReveal}>Reveal solution</button></div></div>;
+const SIGN_IN_FOR_HELP = "Sign in to open hints and solutions.";
+function percent(share: number) { return `${Math.round(share * 100)}%`; }
+
+function HintsPanel({ opened, total, signedIn, xpShare, onReveal }: { opened: string[]; total: number; signedIn: boolean; xpShare: number; onReveal: () => void }) {
+  const remaining = total - opened.length;
+  return <div className="rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-50">
+    <h3 className="font-bold">Hints</h3>
+    <p className="mt-2">Opened {opened.length} of {total}. {xpShare < 1 ? `A clear after opening any hint earns ${percent(xpShare)} of the quest XP.` : "Hints do not reduce the quest XP."}</p>
+    {opened.length ? <ol className="mt-3 list-decimal space-y-2 pl-5 leading-6">{opened.map((text, index) => <li key={index}>{text}</li>)}</ol> : null}
+    {total === 0 ? <p className="mt-3">No hints for this quest yet.</p> : !signedIn ? <p className="mt-3 text-amber-200">{SIGN_IN_FOR_HELP}</p> : remaining > 0 ? <button className="control mt-4" onClick={onReveal}>{opened.length ? "Reveal another hint" : "Reveal a hint"}</button> : <p className="mt-3 text-amber-200">All hints are open.</p>}
+  </div>;
+}
+
+function SolutionGate({ solution, signedIn, xpShare, confirming, onAskConfirm, onCancel, onReveal }: { solution: string | undefined; signedIn: boolean; xpShare: number; confirming: boolean; onAskConfirm: () => void; onCancel: () => void; onReveal: () => void }) {
+  if (solution !== undefined) return <div className="rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4"><h3 className="font-bold text-amber-100">Solution revealed — solution-assisted</h3><pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 font-mono text-xs text-amber-50">{solution}</pre></div>;
+  if (!signedIn) return <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300"><h3 className="font-bold text-amber-100">Solution is hidden</h3><p className="mt-2">{SIGN_IN_FOR_HELP}</p></div>;
+  if (confirming) return <div className="rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-50"><h3 className="font-bold">Reveal solution?</h3><p className="mt-2 leading-6">This will show the reference solution and mark future clears as solution-assisted, which earns {percent(xpShare)} of the quest XP. Use it only if you want to study the answer.</p><div className="mt-4 flex flex-wrap gap-2"><button className="control" onClick={onCancel}>Cancel</button><button className="rounded-xl bg-amber-300 px-4 py-2 font-bold text-slate-950" onClick={onReveal}>Reveal solution</button></div></div>;
   return <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300"><h3 className="font-bold text-amber-100">Solution is hidden</h3><p className="mt-2">Opening this tab does not reveal the answer. Confirm first if you want to view it.</p><button className="control mt-4" onClick={onAskConfirm}>I want to view the solution</button></div>;
 }
 
@@ -692,38 +701,33 @@ function StatusPill({ label, tone }: { label: string; tone: "cyan" | "gold" | "g
   return <span className={`status-label rounded-xl border px-2 py-1 ${tones[tone]}`}>{label}</span>;
 }
 
-function LibraryPanel({ progress, activeId, onSelect }: { progress: ProgressState; activeId: string; onSelect: (id: string) => void }) {
-  return <aside className="rounded-3xl border border-white/10 bg-slate-950/80 p-4"><h2 className="text-xl font-bold">Library by category</h2><p className="mt-1 text-sm text-slate-400">Binary search · Linked list · review-enabled</p><div className="mt-4 space-y-2">{CHALLENGES.map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); return <button key={challenge.id} className={`w-full rounded-2xl border p-3 text-left text-sm ${activeId === challenge.id ? "border-cyan-300 bg-cyan-300/10" : "border-white/10 bg-white/5"}`} onClick={() => onSelect(challenge.id)}><span className="font-bold">{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</span><span className="mt-1 block text-xs text-slate-400">{challenge.packTitle} · {cleared ? "cleared" : locked ? "locked" : "unlocked"} · {(progress.attempts[challenge.id] ?? []).length} attempts</span></button>; })}</div></aside>;
-}
-
-type ReviewItem = { pack: Pack; record: ReviewRecord; variant?: ReviewVariant; isDue: boolean; isSnoozed: boolean; studied: boolean };
-function ReviewPanel({ items, dueCount, onPreview, onSnooze, onSurprise }: { items: ReviewItem[]; dueCount: number; onPreview: (item: ReviewItem) => void; onSnooze: (packSlug: string) => void; onSurprise: () => void }) {
-  return <aside className="rounded-3xl border border-emerald-300/20 bg-emerald-950/20 p-4"><div className="flex items-center justify-between gap-2"><div><h2 className="text-xl font-bold">Review scheduler</h2><p className="text-sm text-slate-400">stale-review scheduler · review variants · snooze/preview</p></div><button className="rounded-xl bg-emerald-300 px-3 py-2 text-xs font-bold text-slate-950" onClick={onSurprise}>Surprise battle</button></div><p className="mt-3 rounded-xl border border-white/10 bg-white/5 p-2 text-sm">{dueCount} due now. Surprise battles only draw from studied boss topics.</p><div className="mt-3 space-y-2">{items.length ? items.map((item) => <div key={item.pack.slug} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm"><b>{item.pack.metadata.displayName ?? item.pack.title}</b><p className="text-xs text-slate-400">next due {formatDate(item.record.nextDueAt)} · interval {item.record.intervalDays}d · streak {item.record.streak} · rating {item.record.rating}</p><p className="mt-1 text-xs text-emerald-100">Variant: {item.variant?.title ?? "boss replay"}</p><div className="mt-2 flex gap-2"><button className="control" onClick={() => onPreview(item)}>Preview</button><button className="control" onClick={() => onSnooze(item.pack.slug)}>Snooze 1d</button></div>{item.isSnoozed ? <p className="mt-1 text-xs text-amber-200">snoozed until {formatDate(item.record.snoozedUntil)}</p> : null}</div>) : <p className="mt-3 text-sm text-slate-400">Beat a boss to put it on spaced review.</p>}</div></aside>;
-}
-
+type ReviewItem = { pack: Pack; record: ReviewRecord; isDue: boolean; isSnoozed: boolean };
 function RewardPanel({ rewards, onSpend }: { rewards: RewardWallet; onSpend: () => void }) {
-  return <aside className="rounded-3xl border border-yellow-300/20 bg-yellow-950/20 p-4"><h2 className="text-xl font-bold">Reward currency model</h2><p className="text-sm text-slate-400">XP tracks effort. Shards come from boss clears only.</p><div className="mt-3 grid grid-cols-2 gap-2"><Metric label="XP" value={`${rewards.xp}`} /><Metric label="Shards" value={`${rewards.shards}`} /></div><button className="control mt-3" onClick={onSpend}>Spend 1 Shard: unlock cosmetic shop preview</button><p className="mt-2 text-xs text-yellow-100">Spend target placeholder: {rewards.shopPreviewUnlocked ? "shop preview unlocked" : "pixel aura shop locked"}</p><div className="mt-3 max-h-36 space-y-2 overflow-auto text-xs">{rewards.grants.length ? rewards.grants.map((grant) => <div key={grant.id} className="rounded-xl bg-white/5 p-2">+{grant.xp} XP · +{grant.shards} Shards · {grant.reason}</div>) : <p className="text-slate-400">Reward grant events appear after first-time quest or boss clears.</p>}</div></aside>;
+  return <aside className="rounded-3xl border border-yellow-300/20 bg-yellow-950/20 p-4"><h2 className="text-xl font-bold">Rewards</h2><p className="text-sm text-slate-400">XP tracks effort. Shards come from boss clears only.</p><div className="mt-3 grid grid-cols-2 gap-2"><Metric label="XP" value={`${rewards.xp}`} /><Metric label="Shards" value={`${rewards.shards}`} /></div><button className="control mt-3" onClick={onSpend}>Spend 1 Shard: unlock cosmetic shop preview</button><p className="mt-2 text-xs text-yellow-100">{rewards.shopPreviewUnlocked ? "Shop preview unlocked." : "Shop preview locked."}</p><div className="mt-3 max-h-36 space-y-2 overflow-auto text-xs">{rewards.grants.length ? rewards.grants.map((grant) => <div key={grant.id} className="rounded-xl bg-white/5 p-2">+{grant.xp} XP · +{grant.shards} Shards · {grant.reason}</div>) : <p className="text-slate-400">Reward grant events appear after first-time quest or boss clears.</p>}</div></aside>;
 }
 
-function StatsPanel({ stats }: { stats: TopicStat[] }) {
-  return <aside className="rounded-3xl border border-purple-300/20 bg-purple-950/20 p-4"><h2 className="text-xl font-bold">Per-topic stats</h2><p className="text-sm text-slate-400">defeated · attempts · hint/solution use · streak/rating</p><div className="mt-3 space-y-2">{stats.map((stat) => <div key={stat.topic} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm"><b>{stat.topic}</b><p className="text-xs text-slate-400">defeated {stat.defeated} · attempts {stat.attempts} · hints {stat.hints} · solutions {stat.solutions} · streak {stat.streak} · rating {stat.rating}</p></div>)}</div></aside>;
-}
-
-function FriendPanel({ enabled, onToggle, friends }: { enabled: boolean; onToggle: () => void; friends: Friend[] }) {
-  return <aside className="rounded-3xl border border-sky-300/20 bg-sky-950/20 p-4"><div className="flex items-center justify-between gap-2"><div><h2 className="text-xl font-bold">Optional friend list/social shell</h2><p className="text-sm text-slate-400">Social is optional and never blocks solo practice.</p></div><button className="control" onClick={onToggle}>{enabled ? "Hide" : "Enable"}</button></div>{enabled ? <div className="mt-3 space-y-2">{friends.map((friend) => <div key={friend.id} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm"><b>{friend.name}</b><p className="text-xs text-slate-400">{friend.status} · rating {friend.rating}</p></div>)}</div> : <p className="mt-3 text-sm text-slate-400">Solo mode active. Enable only if you want light social accountability.</p>}</aside>;
-}
 
 function StatBar({ stat }: { stat: StatBarData }) {
   return <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3"><div className="mb-2 flex items-center justify-between text-sm"><b>Stat bar</b><span>{stat.label}</span></div><div className="h-3 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-300" style={{ width: `${stat.percent}%` }} /></div><p className="mt-2 text-xs text-cyan-100">{stat.detail}</p></div>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><p className="text-[0.65rem] uppercase tracking-[0.2em] text-slate-500">{label}</p><p className="mt-1 truncate font-bold text-cyan-100">{value}</p></div>; }
-function OutcomeBadge({ status, passed }: { status: Status; passed: boolean }) { const copy = OUTCOME_COPY[status]; return <div className={`rounded-2xl border px-4 py-3 ${copy.tone}`}><p className="text-sm font-bold">{passed ? "Victory replay ready" : copy.title}</p><p className="text-xs opacity-80">Visual: {copy.visual}</p></div>; }
+function OutcomeBadge({ status, passed }: { status: Status; passed: boolean }) { const copy = OUTCOME_COPY[status]; return <div className={`rounded-2xl border px-4 py-3 ${copy.tone}`}><p className="text-sm font-bold">{passed ? "Victory replay ready" : copy.title}</p></div>; }
 function PlaybackControls(props: { cursor: number; total: number; playing: boolean; speed: number; onBack: () => void; onStep: () => void; onSkipStart: () => void; onSkipEnd: () => void; onToggle: () => void; onSpeed: () => void }) { return <div className="flex flex-wrap items-center gap-2 text-sm"><button className="control" onClick={props.onSkipStart}>⏮</button><button className="control" onClick={props.onBack}>Back</button><button className="control bg-cyan-300 text-slate-950" onClick={props.onToggle}>{props.playing ? "Pause" : "Play"}</button><button className="control" onClick={props.onStep}>Step</button><button className="control" onClick={props.onSkipEnd}>⏭</button><button className="control" onClick={props.onSpeed}>{props.speed}×</button><span className="min-w-24 text-slate-400">{props.total ? props.cursor + 1 : 0}/{props.total}</span></div>; }
 
 function SceneRenderer(props: { replay: ReplayCase | null; activeReadIndex?: number; vars: Record<string, unknown>; mode: string }) {
   if (props.replay?.input.structure === "linked_list") return <LinkedListScene replay={props.replay} vars={props.vars} />;
+  if (props.replay && props.replay.input.values.length === 0) return <CallScene replay={props.replay} />;
   return <ArrayScene {...props} />;
+}
+/** Replay header for challenges whose inputs are plain values rather than a list to draw. */
+function CallScene({ replay }: { replay: ReplayCase }) {
+  return <div className="rounded-3xl border border-cyan-300/20 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
+    <h2 className="text-xl font-bold">Replayed call</h2>
+    <p className="mt-2 font-mono text-sm text-cyan-100">{formatCaseArguments(replay)}</p>
+    <p className="mt-2 text-sm text-slate-300">expected <span className="font-mono text-emerald-200">{formatValue(replay.expected)}</span> · returned <span className={`font-mono ${replay.passed ? "text-emerald-200" : "text-rose-200"}`}>{formatValue(replay.actual)}</span></p>
+    <p className="mt-2 text-xs text-slate-400">Step through the line trace and variables below to follow this call.</p>
+  </div>;
 }
 function LinkedListScene({ replay, vars }: { replay: ReplayCase | null; vars: Record<string, unknown> }) { const values = replay?.input.values ?? []; return <div className="rounded-3xl border border-purple-300/20 bg-gradient-to-b from-slate-900 to-slate-950 p-4"><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Linked-list pointer scene</h2><p className="text-sm text-slate-400">pointer movement / relinking visible</p></div><div className="flex flex-wrap items-center gap-3">{values.map((value, index) => <div key={`${index}-${value}`} className="flex items-center gap-3"><div className="relative rounded-full border border-purple-200/50 bg-purple-300/15 px-4 py-3 text-center shadow-lg shadow-purple-950/40"><span className="block text-[0.65rem] text-purple-200">node {index}</span><b>{value}</b>{Object.values(vars).includes(index) ? <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded bg-yellow-300 px-1 text-[0.6rem] font-bold text-slate-950">ptr</span> : null}</div>{index < values.length - 1 ? <span className="text-purple-200">⟶ portal</span> : null}</div>)}</div><p className="mt-3 text-xs text-slate-400">Replay reads `.val` and `.next` through ListNode proxies so portal checks are counted and shown in the event stream.</p></div>; }
 function ArrayScene({ replay, activeReadIndex, vars, mode }: { replay: ReplayCase | null; activeReadIndex?: number; vars: Record<string, unknown>; mode: string }) { const values = replay?.input.values ?? []; const target = replay?.input.target; const expected = replay?.input.expectedIndex; const large = mode === "skyline"; const shown = large ? values.slice(0, 80) : values; return <div className="rounded-3xl border border-cyan-300/20 bg-gradient-to-b from-slate-900 to-slate-950 p-4"><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Array scene: {large ? "skyline" : "doors"}</h2><p className="text-sm text-slate-400">target relic: <span className="text-cyan-200">{String(target ?? "?")}</span></p></div><div className={`grid gap-2 ${large ? "grid-cols-[repeat(40,minmax(0,1fr))]" : "grid-cols-7"}`}>{shown.map((value, index) => { const isRead = index === activeReadIndex; const isExpected = index === expected; const hasPointer = Object.values(vars).includes(index); return <div key={`${index}-${value}`} className={`relative flex items-end justify-center rounded-xl border text-xs transition-all ${large ? "h-28" : "h-20"} ${isRead ? "border-cyan-200 bg-cyan-300/30 shadow-lg shadow-cyan-300/30" : "border-white/10 bg-white/5"} ${isExpected ? "ring-2 ring-emerald-300" : ""}`}>{large ? <div className="w-full rounded-t-lg bg-cyan-400/50" style={{ height: `${Math.max(8, (Number(value) / Math.max(1, values.length)) * 100)}%` }} /> : <><span className="absolute top-2 text-[0.65rem] text-slate-500">#{index}</span><span className="pb-4 font-bold">{value}</span></>}{hasPointer ? <span className="absolute -top-3 rounded bg-yellow-300 px-1 text-[0.6rem] font-bold text-slate-950">var</span> : null}</div>; })}</div>{large && values.length > shown.length ? <p className="mt-2 text-xs text-slate-500">Showing first {shown.length} of {values.length} skyline bars to keep 3,000-step replays responsive.</p> : null}</div>; }
@@ -776,45 +780,16 @@ function normalizeProgress(value: unknown): ProgressState {
     friendsEnabled: Boolean(raw.friendsEnabled)
   };
 }
-function readProgress(key: string): ProgressState { try { return normalizeProgress(JSON.parse(window.localStorage.getItem(key) || "{}")); } catch { return EMPTY_PROGRESS; } }
-function writeProgress(key: string, value: ProgressState) { try { window.localStorage.setItem(key, JSON.stringify(value)); } catch {} }
 function safeLocalStorageGet(key: string) { try { return window.localStorage.getItem(key); } catch { return null; } }
 function safeLocalStorageSet(key: string, value: string) { try { window.localStorage.setItem(key, value); } catch {} }
 function safeLocalStorageRemove(key: string) { try { window.localStorage.removeItem(key); } catch {} }
-function addDays(date: Date, days: number) { const next = new Date(date); next.setDate(next.getDate() + days); return next; }
-function formatDate(value?: string) { if (!value) return "none"; return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
-function nextInterval(schedule: number[], previous: number) { return schedule.find((days) => days > previous) ?? Math.min(previous * 2, schedule.at(-1) ?? 30); }
-function scheduleReview(current: ProgressState, challenge: Challenge, runResult: RunResult, solutionAssisted: boolean, hintCount: number) {
-  const pack = PACK_BY_SLUG[challenge.packSlug];
-  const existing = current.reviews[challenge.packSlug];
-  const schedule = pack.review?.defaultSchedule ?? [1, 3, 7, 14, 30];
-  const prior = existing?.intervalDays ?? 0;
-  const easyWin = runResult.passed && !solutionAssisted && hintCount === 0;
-  const assistedWin = runResult.passed && (solutionAssisted || hintCount > 0);
-  const intervalDays = easyWin ? nextInterval(schedule, prior) : assistedWin ? Math.max(1, Math.min(prior || schedule[0], hintCount >= 2 ? 3 : 7)) : 1;
-  const streak = runResult.passed ? (existing?.streak ?? 0) + 1 : 0;
-  const rating = Math.max(0, Math.min(2400, (existing?.rating ?? 1000) + (easyWin ? 80 : assistedWin ? 20 : -60)));
-  return {
-    ...current.reviews,
-    [challenge.packSlug]: {
-      packSlug: challenge.packSlug,
-      bossId: challenge.id,
-      topic: challenge.packConcepts[0] ?? challenge.packTitle,
-      intervalDays,
-      nextDueAt: addDays(new Date(), intervalDays).toISOString(),
-      lastOutcome: runResult.status,
-      streak,
-      rating
-    }
-  };
-}
 function buildReviewItems(progress: ProgressState): ReviewItem[] {
   const now = Date.now();
   return Object.values(progress.reviews).map((record) => {
-    const pack = PACK_BY_SLUG[record.packSlug];
+    const pack: Pack | undefined = PACK_BY_SLUG[record.packSlug];
     const snoozedUntil = record.snoozedUntil ? new Date(record.snoozedUntil).getTime() : 0;
-    return { pack, record, variant: pack.review?.variants?.[0], isDue: new Date(record.nextDueAt).getTime() <= now, isSnoozed: snoozedUntil > now, studied: Boolean(progress.cleared[record.bossId]) };
-  }).filter((item) => item.pack);
+    return { pack, record, isDue: new Date(record.nextDueAt).getTime() <= now, isSnoozed: snoozedUntil > now };
+  }).filter((item): item is ReviewItem => item.pack !== undefined);
 }
 type TopicStat = { topic: string; defeated: number; attempts: number; hints: number; solutions: number; streak: number; rating: number };
 function buildTopicStats(progress: ProgressState): TopicStat[] {
@@ -844,15 +819,4 @@ function buildStatBar(progress: ProgressState): StatBarData {
   const defeated = PACKS.filter((pack) => progress.cleared[pack.boss.id]).length;
   const percent = Math.round((defeated / Math.max(1, totalBosses)) * 100);
   return { label: `${defeated}/${totalBosses} bosses defeated`, percent, detail: `${progress.rewards.xp} XP · ${progress.rewards.shards} Shards · ${Object.values(progress.attempts).flat().length} attempts logged` };
-}
-function rewardForChallenge(challenge: Challenge, solutionAssisted: boolean, hintCount: number) {
-  const baseXp = challenge.rewards?.xp ?? (challenge.isBoss ? 100 : 20);
-  const baseShards = challenge.rewards?.shards ?? (challenge.isBoss ? 1 : 0);
-  const penalty = solutionAssisted ? 0.5 : hintCount > 0 ? 0.75 : 1;
-  return { xp: Math.max(5, Math.round(baseXp * penalty)), shards: baseShards, reason: challenge.isBoss ? "boss reward grant" : "quest reward grant" };
-}
-function grantReward(current: ProgressState, challenge: Challenge, solutionAssisted: boolean, hintCount: number): RewardWallet {
-  const reward = rewardForChallenge(challenge, solutionAssisted, hintCount);
-  const grant: RewardGrant = { id: `${challenge.id}-reward-${Date.now()}`, at: new Date().toISOString(), challengeId: challenge.id, ...reward };
-  return { ...current.rewards, xp: current.rewards.xp + reward.xp, shards: current.rewards.shards + reward.shards, grants: [grant, ...current.rewards.grants].slice(0, 20) };
 }

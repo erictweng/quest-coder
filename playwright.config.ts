@@ -14,7 +14,8 @@ export default defineConfig({
       timeout: 30_000
     },
     {
-      command: "node -e \"require('fs').rmSync('.data/e2e.sqlite',{force:true})\" && QUEST_CODER_DATABASE_PATH=.data/e2e.sqlite QUEST_CODER_RUNNER_URL=http://127.0.0.1:8788 QUEST_CODER_RUNNER_TOKEN=e2e-token npm run dev -- --port 3170",
+      // Runs the production build (see the test:e2e script), with a fresh database per run.
+      command: "node -e \"require('fs').rmSync('.data/e2e',{recursive:true,force:true})\" && QUEST_CODER_DATABASE_PATH=.data/e2e/quest-coder.sqlite QUEST_CODER_RUNNER_URL=http://127.0.0.1:8788 QUEST_CODER_RUNNER_TOKEN=e2e-token npm run start -- --port 3170",
       url: "http://127.0.0.1:3170/api/health",
       reuseExistingServer: false,
       timeout: 60_000

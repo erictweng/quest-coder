@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -10,15 +9,16 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKS_ROOT = ROOT / "runner" / "packs"
 sys.path.insert(0, str(ROOT))
 
-from runner.quest_runner import run_submission
+from runner.quest_runner import default_rotated_budget, run_submission
 
 ALLOWED_FIELDS = {"source", "packSlug", "challengeId", "mode"}
 ALLOWED_PACKS = {"forest-of-patience-climbing-stairs"}
 ALLOWED_MODES = {"run", "submit"}
 
 
-def default_rotated_budget(n: int) -> int:
-    return 4 * math.ceil(math.log2(n + 1)) + 16
+# Whole-submission deadline. Must stay below the gateway's worker timeout so a
+# non-terminating submission comes back classified instead of as a gateway 504.
+TOTAL_BUDGET_MS = 5_500
 
 
 def budget_limit(challenge: dict[str, Any], tests: list[dict[str, Any]]) -> int | None:
@@ -86,8 +86,10 @@ def main() -> int:
             max_events=int(pack.get("runtime", {}).get("timelineEventCap", 3000)),
             mode=mode,
             replay_test=replay_test,
+            isolate=True,
+            total_budget_ms=TOTAL_BUDGET_MS,
         )
-        print(json.dumps(result))
+        print(json.dumps(result, allow_nan=False))
         return 0
     except Exception as exc:
         print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}), file=sys.stderr)

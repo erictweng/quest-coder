@@ -11,8 +11,6 @@ tsconfig.tsbuildinfo
 # Local runtime and agent state
 .data/
 .hsub/
-AGENTS.md
-CLAUDE.md
 
 # Generated test output
 coverage/

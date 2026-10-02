@@ -1,80 +1,44 @@
-# Quest Coder Personal MVP Database Schema
+# Quest Coder Database Schema
 
-Sprint 4 implements persistence in browser `localStorage` for the personal MVP, while documenting the database shape that Sprint 4 app state maps to. A later server database can lift these tables directly into Postgres/SQLite.
+Progress is stored in SQLite by `lib/progress-store.ts`. The default path is `.data/quest-coder.sqlite`; set `QUEST_CODER_DATABASE_PATH` to change it. The schema is created on first use.
 
 ## Tables
 
-### users
+### sessions
 
-- `id` text primary key
+- `token_hash` text primary key: SHA-256 of the session cookie's token. The token itself is never stored.
 - `display_name` text not null
-- `created_at` timestamp not null
-- `last_login_at` timestamp not null
+- `created_at` text not null (ISO 8601)
+- `last_seen_at` text not null (ISO 8601)
 
-Personal MVP mapping: `quest-coder:session` stores the active display name.
+There are no accounts. The cookie is the only key to a save, logging out does not delete the row, and rows idle for more than 400 days are removed when the database is opened.
 
-### quest_packs
+### progress
 
-- `id` text primary key
-- `slug` text unique not null
-- `title` text not null
-- `schema_version` text not null
-- `status` text not null
-- `raw_json` json not null
+- `token_hash` text primary key, references `sessions(token_hash)` with cascade delete
+- `payload` text not null: one JSON document, at most 1 MB
+- `updated_at` text not null (ISO 8601)
 
-Personal MVP mapping: checked-in JSON under `content/packs/*.json`.
+## Progress payload
 
-### challenges
+The payload has two halves with different writers.
 
-- `id` text primary key
-- `pack_id` text not null references `quest_packs(id)`
-- `kind` text not null check in (`quest`, `boss`)
-- `order_index` integer
-- `title` text not null
-- `entrypoint` text not null
-- `starter_code` text not null
-- `solution_code` text not null
-- `unlock_requires` json not null
+Server-owned, changed only by a passing submit or a `POST /api/progress` action:
 
-Personal MVP mapping: `pack.quests[]` and `pack.boss`.
+- `cleared`: `{ [challengeId]: true }`
+- `rewards`: `{ xp, shards, grants[], shopPreviewUnlocked }`; `grants` keeps the latest 20
+- `reviews`: `{ [packSlug]: { bossId, topic, intervalDays, nextDueAt, lastOutcome, streak, rating } }`
+- `hintsOpened`: `{ [challengeId]: count }`
+- `solutionOpened`: `{ [challengeId]: true }`
 
-### user_progress
+Client-owned, written by `PUT /api/progress`:
 
-- `user_id` text not null references `users(id)`
-- `challenge_id` text not null references `challenges(id)`
-- `cleared` boolean not null default false
-- `solution_opened` boolean not null default false
-- `saved_code` text not null default empty string
-- `updated_at` timestamp not null
-- primary key (`user_id`, `challenge_id`)
+- `savedCode`: `{ [challengeId]: source }`, each at most 24,000 bytes
+- `attempts`: `{ [challengeId]: attempt[] }`, latest 15 per challenge
+- `friendsEnabled`: boolean (no UI at present)
 
-Personal MVP mapping: `quest-coder:profile:<displayName>.cleared`, `.solutionOpened`, `.savedCode`.
+Anything server-owned in a `PUT` body is ignored.
 
-### attempts
+## Scaling note
 
-- `id` text primary key
-- `user_id` text not null references `users(id)`
-- `challenge_id` text not null references `challenges(id)`
-- `status` text not null
-- `passed` boolean not null
-- `replay_case_id` text
-- `event_count` integer not null
-- `timeline_pointer` text not null
-- `solution_assisted` boolean not null
-- `created_at` timestamp not null
-
-Personal MVP mapping: `quest-coder:profile:<displayName>.attempts[challengeId][]`.
-
-### timelines
-
-- `id` text primary key
-- `attempt_id` text not null references `attempts(id)`
-- `storage_pointer` text not null
-- `schema_version` text not null
-- `summary_json` json not null
-
-Personal MVP mapping: timeline pointer is recorded in each attempt as `<challengeId>:<caseId>:<startedAt>`. Full timelines are still returned live by `/api/run`; long-term server-side timeline storage is deferred.
-
-## Sprint 4 persistence rule
-
-The UI must prove the shape end to end before adding real auth/database infrastructure: sign in, run/clear quests, unlock boss, log out, sign back in, and recover progress from the persisted profile blob.
+SQLite on local disk suits one app instance with a durable volume. A multi-instance deployment needs a shared database behind the same functions in `lib/progress-store.ts`.

@@ -106,21 +106,24 @@ Each visible failure provides a diagnosis and one next action without exposing t
 ```text
 app/                 Next.js UI and API routes
 components/          Extracted result and completion UI
-content/public/      Browser-safe pack projections
+content/public/      Browser pack projection: no hidden tests, solutions or hint text
+content/server/      Next.js server pack projection: no hidden tests
 lib/                 contracts, runner client, progress repository
-runner/packs/        private grading fixtures
+runner/packs/        pack source of truth, including private grading fixtures
 runner/service/      separately deployable HTTP gateway
 runner/tests/        execution and boundary tests
-scripts/             maintained schema/source smoke tests
-tests/e2e/           Playwright behavior tests
+scripts/             pack projection generator and pack validator
+tests/unit/          progress store, rate limiter and client helper tests
+tests/e2e/           Playwright behavior tests against the production build
 .github/workflows/   release gate
 ```
 
 ## Release gates
 
-- TypeScript typecheck
+- TypeScript typecheck, including unused code
+- pack projections in sync with `runner/packs/`
+- unit tests
 - Python runner tests
-- maintained smoke suite
 - production build
 - Playwright trusted-slice journey
 - dependency audit
