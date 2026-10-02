@@ -1,11 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import samplePack from "../content/packs/timequake-search-rotated-array.json";
-import reversePack from "../content/packs/reverse-linked-list.json";
-import mergePack from "../content/packs/merge-two-sorted-lists.json";
-import cyclePack from "../content/packs/linked-list-cycle.json";
-import plainBinaryPack from "../content/packs/plain-binary-search.json";
 import climbingStairsPack from "../content/packs/forest-of-patience-climbing-stairs.json";
 
 type Status =
@@ -134,7 +129,8 @@ type ProgressState = {
   friendsEnabled: boolean;
 };
 
-const PACKS = [samplePack, reversePack, mergePack, cyclePack, plainBinaryPack, climbingStairsPack] as Pack[];
+const PACKS = [climbingStairsPack] as Pack[];
+const DEFAULT_PACK = climbingStairsPack as Pack;
 const PACK_BY_SLUG = Object.fromEntries(PACKS.map((pack) => [pack.slug, pack]));
 const CHALLENGES: Challenge[] = PACKS.flatMap((pack) => [...pack.quests, pack.boss].map((challenge) => ({
   ...challenge,
@@ -168,10 +164,10 @@ export default function Home() {
   const [userName, setUserName] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState>(EMPTY_PROGRESS);
   const [surface, setSurface] = useState<AppSurface>("hub");
-  const [selectedPackSlug, setSelectedPackSlug] = useState(samplePack.slug);
+  const [selectedPackSlug, setSelectedPackSlug] = useState(DEFAULT_PACK.slug);
   const [questionFilter, setQuestionFilter] = useState<QuestionFilter>("All");
   const [solveTab, setSolveTab] = useState<SolveTab>("Question");
-  const [activeId, setActiveId] = useState(samplePack.quests[0]?.id ?? samplePack.boss.id);
+  const [activeId, setActiveId] = useState(DEFAULT_PACK.quests[0]?.id ?? DEFAULT_PACK.boss.id);
   const activeChallenge = useMemo(() => CHALLENGES.find((challenge) => challenge.id === activeId) ?? CHALLENGES[0], [activeId]);
   const [code, setCode] = useState(activeChallenge.starterCode);
   const [result, setResult] = useState<RunResult | null>(null);
@@ -197,7 +193,7 @@ export default function Home() {
   const topicStats = useMemo(() => buildTopicStats(progress), [progress]);
   const statBar = useMemo(() => buildStatBar(progress), [progress]);
   const activePack = PACK_BY_SLUG[activeChallenge.packSlug];
-  const selectedPack = PACK_BY_SLUG[selectedPackSlug] ?? samplePack;
+  const selectedPack = PACK_BY_SLUG[selectedPackSlug] ?? DEFAULT_PACK;
   const bossUnlocked = activePack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]);
   const isActiveLocked = !isUnlocked(activeChallenge, progress);
 
@@ -342,7 +338,7 @@ export default function Home() {
   }
 
   function openCampaign(packSlug: string) {
-    const pack = PACK_BY_SLUG[packSlug] ?? samplePack;
+    const pack = PACK_BY_SLUG[packSlug] ?? DEFAULT_PACK;
     setSelectedPackSlug(pack.slug);
     setActiveId(pack.quests[0]?.id ?? pack.boss.id);
     setSurface("campaignDetail");

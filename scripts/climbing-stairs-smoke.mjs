@@ -50,7 +50,10 @@ milestone("Reference solutions pass all tests", () => {
   for (const challenge of [...pack.quests, pack.boss]) runReference(challenge);
 });
 
-milestone("Quest Coder app imports the Climbing Stairs pack", () => {
+milestone("Quest Coder app only lists the Climbing Stairs pack", () => {
   assert(page.includes("forest-of-patience-climbing-stairs.json"), "app import missing");
-  assert(page.includes("climbingStairsPack"), "PACKS wiring missing");
+  assert(page.includes("const PACKS = [climbingStairsPack]"), "PACKS should contain only climbing stairs");
+  for (const retiredImport of ["timequake-search-rotated-array.json", "reverse-linked-list.json", "merge-two-sorted-lists.json", "linked-list-cycle.json", "plain-binary-search.json"]) {
+    assert(!page.includes(retiredImport), `app still imports retired pack ${retiredImport}`);
+  }
 });
