@@ -12,7 +12,7 @@ function progressResponse(progress: StoredProgress) {
 export async function GET() {
   const session = await currentSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  return progressResponse(readServerProgress(session.tokenHash));
+  return progressResponse(await readServerProgress(session.progressKey));
 }
 
 /** Saves client-owned state: editor drafts, attempt history, and UI preferences. */
@@ -21,9 +21,8 @@ export async function PUT(request: Request) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await readJsonBody(request) as { progress?: unknown } | null;
   if (!body || typeof body.progress !== "object" || body.progress === null) return NextResponse.json({ error: "invalid progress" }, { status: 400 });
-  try { writeClientProgress(session.tokenHash, body.progress); }
+  try { return progressResponse(await writeClientProgress(session.progressKey, body.progress)); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "write failed" }, { status: 400 }); }
-  return NextResponse.json({ saved: true });
 }
 
 /** Player actions that change server-owned state: opening help and spending shards. */
@@ -33,7 +32,7 @@ export async function POST(request: Request) {
   const body = await readJsonBody(request) as { action?: unknown; challengeId?: unknown } | null;
   const found = typeof body?.challengeId === "string" ? findChallengeById(body.challengeId) : null;
   // Help is only available for quests the player has reached.
-  const { cleared } = readServerProgress(session.tokenHash);
+  const { cleared } = await readServerProgress(session.progressKey);
   const locked = found ? (found.challenge.unlock?.requiresQuestIds ?? []).some((id) => !cleared[id]) : false;
   const lockedResponse = () => NextResponse.json({ error: "Clear the previous quest with Submit all first.", code: "prerequisite_locked" }, { status: 409 });
 
@@ -41,13 +40,13 @@ export async function POST(request: Request) {
     case "open_hint":
       if (!found) return NextResponse.json({ error: "unknown challenge" }, { status: 400 });
       if (locked) return lockedResponse();
-      return progressResponse(recordHintOpened(session.tokenHash, found.challenge.id, found.challenge.hints?.length ?? 0));
+      return progressResponse(await recordHintOpened(session.progressKey, found.challenge.id, found.challenge.hints?.length ?? 0));
     case "open_solution":
       if (!found) return NextResponse.json({ error: "unknown challenge" }, { status: 400 });
       if (locked) return lockedResponse();
-      return progressResponse(recordSolutionOpened(session.tokenHash, found.challenge.id));
+      return progressResponse(await recordSolutionOpened(session.progressKey, found.challenge.id));
     case "unlock_shop_preview":
-      return progressResponse(unlockShopPreview(session.tokenHash));
+      return progressResponse(await unlockShopPreview(session.progressKey));
     default:
       return NextResponse.json({ error: "unknown action" }, { status: 400 });
   }

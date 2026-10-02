@@ -20,6 +20,8 @@
     "test:trusted-slice": "npm run lint && npm run test:packs && npm run test:unit && npm run test:runner && npm run test:e2e"
   },
   "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.117.2",
     "@tailwindcss/postcss": "4.3.3",
     "next": "16.3.8",
     "react": "19.3.0",

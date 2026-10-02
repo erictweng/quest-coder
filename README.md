@@ -31,7 +31,7 @@ npm run dev
 
 The same `QUEST_CODER_RUNNER_TOKEN` must be present in `.env.local` and the runner process.
 
-Sign-in creates an opaque HttpOnly session cookie and stores progress in `.data/quest-coder.sqlite`. There are no accounts: the cookie is the only key to a save file. Logging out hides the profile on that browser but keeps the save, and signing in again on the same browser resumes it. Clearing cookies or switching browsers starts a new save.
+With Supabase configured, production sign-in uses passwordless email and progress is keyed by the immutable Supabase Auth user UUID in Postgres. With all Supabase variables absent, local/test mode keeps the existing opaque HttpOnly display-name session and `.data/quest-coder.sqlite` save. See `docs/SUPABASE_SETUP.md`.
 
 ## Verification gate
 

@@ -120,11 +120,13 @@ type QuestionFilter = "All" | "Available" | "Cleared" | "Review" | "Boss";
 type SolveTab = "Question" | "Animation" | "Hints" | "Solution" | "Submissions";
 const SOLVE_TABS: SolveTab[] = ["Question", "Animation", "Hints", "Solution", "Submissions"];
 type ProgressState = {
+  version: number;
   cleared: Record<string, boolean>;
   solutionOpened: Record<string, boolean>;
   hintsOpened: Record<string, number>;
   attempts: Record<string, Attempt[]>;
   savedCode: Record<string, string>;
+  savedCodeVersions: Record<string, number>;
   reviews: Record<string, ReviewRecord>;
   rewards: RewardWallet;
   friendsEnabled: boolean;
@@ -151,7 +153,7 @@ const SAVE_DEBOUNCE_MS = 400;
 // Chromium rejects keepalive request bodies somewhere under 64 KiB; stay well below it.
 const KEEPALIVE_MAX_BYTES = 48_000;
 const LOCKED_REASON = "Clear the previous quest with Submit all first";
-const EMPTY_PROGRESS: ProgressState = { cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false };
+const EMPTY_PROGRESS: ProgressState = { version: 0, cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, savedCodeVersions: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false };
 
 const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string }> = {
   passed: { title: "passed:", visual: "gold relic glow", tone: "text-emerald-200 bg-emerald-500/15 border-emerald-300/40" },
@@ -169,6 +171,7 @@ export default function Home() {
   const gutterRef = useRef<HTMLPreElement | null>(null);
   const [userNameDraft, setUserNameDraft] = useState("");
   const [userName, setUserName] = useState<string | null>(null);
+  const [authProvider, setAuthProvider] = useState<"local" | "supabase" | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState>(EMPTY_PROGRESS);
   const [revealed, setRevealed] = useState<Revealed>(EMPTY_REVEALED);
@@ -236,11 +239,13 @@ export default function Home() {
     let cancelled = false;
     const lastName = safeLocalStorageGet(SESSION_NAME_KEY);
     if (lastName) setUserNameDraft(lastName);
-    // Logging out keeps the server save and its cookie; this flag only stops the auto-resume.
-    if (safeLocalStorageGet(SIGNED_OUT_KEY)) return;
     void (async () => {
       try {
-        const session = await (await fetch("/api/session", { cache: "no-store" })).json() as { authenticated?: boolean; displayName?: string };
+        const session = await (await fetch("/api/session", { cache: "no-store" })).json() as { authenticated?: boolean; displayName?: string; provider?: "local" | "supabase" };
+        if (session.provider) setAuthProvider(session.provider);
+        // Local logout keeps the opaque cookie so a later display-name sign-in
+        // resumes the same save. Supabase logout invalidates the auth session.
+        if (session.provider === "local" && safeLocalStorageGet(SIGNED_OUT_KEY)) return;
         if (cancelled || !session.authenticated || !session.displayName) return;
         const response = await fetch("/api/progress", { cache: "no-store" });
         if (!response.ok || cancelled) return;
@@ -254,7 +259,7 @@ export default function Home() {
   }, [applySave]);
 
   // Drafts, attempts and preferences are the only state the client writes; the server ignores the rest.
-  const { attempts, savedCode, friendsEnabled } = progress;
+  const { attempts, savedCode, savedCodeVersions, friendsEnabled } = progress;
   const unsavedRef = useRef<string | null>(null);
   /**
    * Sends any pending save now. Pass `closing` when the page may be going away: the request is
@@ -268,16 +273,23 @@ export default function Home() {
     const keepalive = closing && new Blob([body]).size <= KEEPALIVE_MAX_BYTES;
     const keepForRetry = () => { if (unsavedRef.current === null) unsavedRef.current = body; };
     fetch("/api/progress", { method: "PUT", headers: { "content-type": "application/json" }, body, keepalive })
-      .then((response) => { if (!response.ok && response.status !== 401) keepForRetry(); })
+      .then(async (response) => {
+        if (!response.ok) { if (response.status !== 401) keepForRetry(); return; }
+        const saved = await response.json() as { progress?: unknown };
+        const normalized = normalizeProgress(saved.progress);
+        setProgress((current) => current.version === normalized.version && sameNumberRecord(current.savedCodeVersions, normalized.savedCodeVersions)
+          ? current
+          : ({ ...current, version: normalized.version, savedCodeVersions: normalized.savedCodeVersions }));
+      })
       // A save that did not go through stays pending, so the next change or flush sends it again.
       .catch(keepForRetry);
   }, []);
   useEffect(() => {
     if (!userName) return;
-    unsavedRef.current = JSON.stringify({ progress: { attempts, savedCode, friendsEnabled } });
+    unsavedRef.current = JSON.stringify({ progress: { attempts, savedCode, savedCodeVersions, friendsEnabled } });
     const timer = window.setTimeout(() => flushSave(), SAVE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [attempts, savedCode, friendsEnabled, userName, flushSave]);
+  }, [attempts, savedCode, savedCodeVersions, friendsEnabled, userName, flushSave]);
   useEffect(() => {
     const onPageHide = () => flushSave(true);
     window.addEventListener("pagehide", onPageHide);
@@ -376,28 +388,35 @@ export default function Home() {
   }, [events.length, playing, speed]);
 
   async function signIn() {
-    const displayName = userNameDraft.trim();
-    if (!displayName) {
-      setSessionError("Enter a name to sign in.");
+    const identifier = userNameDraft.trim();
+    if (!identifier) {
+      setSessionError(authProvider === "supabase" ? "Enter your email to sign in." : "Enter a name to sign in.");
       return;
     }
     setSessionError(null);
     try {
-      const response = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName }) });
-      const session = await response.json() as { displayName?: string; progress?: unknown; revealed?: Revealed; error?: string };
+      const body = authProvider === "supabase" ? { email: identifier } : { displayName: identifier };
+      const response = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const session = await response.json() as { displayName?: string; progress?: unknown; revealed?: Revealed; error?: string; pending?: boolean; message?: string };
       if (!response.ok) throw new Error(session.error ?? "Sign-in failed.");
-      safeLocalStorageSet(SESSION_NAME_KEY, displayName);
+      if (session.pending) {
+        setSessionError(session.message ?? "Check your email for a sign-in link.");
+        return;
+      }
+      safeLocalStorageSet(SESSION_NAME_KEY, identifier);
       safeLocalStorageRemove(SIGNED_OUT_KEY);
-      applySave(session.displayName ?? displayName, session.progress, session.revealed);
+      applySave(session.displayName ?? identifier, session.progress, session.revealed);
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : "Could not reach the server. Try again.");
     }
   }
 
   /** Hides the profile on this browser. The save stays on the server and resumes at the next sign-in. */
-  function signOut() {
+  async function signOut() {
     flushSave(true);
-    safeLocalStorageSet(SIGNED_OUT_KEY, "1");
+    await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
+    if (authProvider === "local") safeLocalStorageSet(SIGNED_OUT_KEY, "1");
+    else safeLocalStorageRemove(SIGNED_OUT_KEY);
     setUserName(null);
     setProgress(EMPTY_PROGRESS);
     setRevealed(EMPTY_REVEALED);
@@ -515,7 +534,7 @@ export default function Home() {
                 <StatusPill label={result?.execution.mode ? `${result.execution.mode} · ${result.cases.length} cases` : "compiler ready"} tone={result?.passed ? "green" : "cyan"} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={signOut}>Log out</button></> : <><input className="w-24 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} placeholder="Your name" onChange={(event) => setUserNameDraft(event.target.value)} aria-label="User name" /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950" onClick={signIn}>Sign in</button></>}
+                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={() => void signOut()}>Log out</button></> : <><input className="w-32 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Your name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950" onClick={() => void signIn()}>Sign in</button></>}
               </div>
             </div>
           ) : (
@@ -527,9 +546,9 @@ export default function Home() {
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
                   {userName ? (
-                    <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-300">Signed in as <b className="text-cyan-200">{userName}</b></span><button className="control" onClick={signOut}>Log out</button></div>
+                    <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-300">Signed in as <b className="text-cyan-200">{userName}</b></span><button className="control" onClick={() => void signOut()}>Log out</button></div>
                   ) : (
-                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} placeholder="Your name" onChange={(event) => setUserNameDraft(event.target.value)} aria-label="User name" /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950" onClick={signIn}>Sign in</button></div>
+                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Your name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950" onClick={() => void signIn()}>Sign in</button></div>
                   )}
                 </div>
               </div>
@@ -787,11 +806,13 @@ function normalizeProgress(value: unknown): ProgressState {
   return {
     ...EMPTY_PROGRESS,
     ...raw,
+    version: Number.isFinite(raw.version) ? Math.max(0, Math.floor(raw.version ?? 0)) : 0,
     cleared: raw.cleared && typeof raw.cleared === "object" ? raw.cleared : {},
     solutionOpened: raw.solutionOpened && typeof raw.solutionOpened === "object" ? raw.solutionOpened : {},
     hintsOpened: raw.hintsOpened && typeof raw.hintsOpened === "object" ? raw.hintsOpened : {},
     attempts: raw.attempts && typeof raw.attempts === "object" ? raw.attempts : {},
     savedCode: raw.savedCode && typeof raw.savedCode === "object" ? raw.savedCode : {},
+    savedCodeVersions: raw.savedCodeVersions && typeof raw.savedCodeVersions === "object" ? raw.savedCodeVersions : {},
     reviews: raw.reviews && typeof raw.reviews === "object" ? raw.reviews : {},
     rewards: { ...EMPTY_REWARDS, ...(raw.rewards ?? {}) },
     friendsEnabled: Boolean(raw.friendsEnabled)
@@ -800,6 +821,10 @@ function normalizeProgress(value: unknown): ProgressState {
 function safeLocalStorageGet(key: string) { try { return window.localStorage.getItem(key); } catch { return null; } }
 function safeLocalStorageSet(key: string, value: string) { try { window.localStorage.setItem(key, value); } catch {} }
 function safeLocalStorageRemove(key: string) { try { window.localStorage.removeItem(key); } catch {} }
+function sameNumberRecord(left: Record<string, number>, right: Record<string, number>) {
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) => left[key] === right[key]);
+}
 function buildReviewItems(progress: ProgressState): ReviewItem[] {
   const now = Date.now();
   return Object.values(progress.reviews).map((record) => {

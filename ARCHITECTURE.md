@@ -7,7 +7,8 @@ Quest Coder currently exposes one campaign: **Forest of Patience — Climbing St
 ```text
 Browser
   -> Next.js UI and API
-       -> anonymous HttpOnly session + progress repository
+       -> Supabase Auth identity + Postgres progress (production)
+       -> anonymous HttpOnly session + SQLite progress (local fallback)
        -> authenticated HTTP runner client
             -> isolated runner service
                  -> strict pack/challenge lookup
@@ -34,8 +35,9 @@ Next.js owns:
 
 - request validation through `lib/run-contract.ts`;
 - authenticated calls to `QUEST_CODER_RUNNER_URL`;
-- anonymous session cookies;
-- SQLite-backed local progress;
+- Supabase SSR cookie authentication with server-side `auth.getUser()` verification in production;
+- Supabase Postgres progress keyed by immutable Auth user UUID in production;
+- anonymous session cookies and SQLite-backed progress only when Supabase is not configured;
 - authoritative, idempotent clear and reward writes after passing Submit responses;
 - public pack delivery and runner readiness reporting.
 
@@ -56,7 +58,11 @@ The runner maps IDs to fixtures under `runner/packs/`; callers cannot provide pa
 
 For hosted execution, run the supplied container with an outbound-denied network, read-only root filesystem, dropped capabilities, non-root user, limited scratch space, PID limit, CPU limit, and memory limit. A stronger microVM/per-run-container provider remains required before unrestricted multi-tenant public traffic.
 
-### Progress repository
+### Identity and progress repository
+
+Production requires `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and server-only `SUPABASE_SERVICE_ROLE_KEY`. Passwordless email links establish Supabase SSR cookies. API authorization verifies those cookies with `auth.getUser()`; display names are presentation only and never progress keys.
+
+The `ProgressStore` facade selects Supabase only when all three variables are present. Supabase mutations call service-role-only functions in the `quest_coder` schema. Each function creates/locks the user's row before applying an atomic mutation. RLS keys browser reads to `auth.uid()` and browser roles receive no write grants. Drafts use per-challenge revisions and attempts merge by attempt ID, so a delayed tab cannot replace a newer map or erase authoritative progress.
 
 Credential-free local mode uses:
 
@@ -66,7 +72,9 @@ Credential-free local mode uses:
 - server-owned clears, reviews, and reward totals;
 - client-owned drafts and presentation history merged without allowing the client to overwrite authoritative fields.
 
-The default database lives under `.data/`, which is ignored. Ephemeral serverless filesystems are not durable deployment storage; hosted deployments must mount durable storage or implement the same repository contract with a hosted database.
+SQLite mutations run under `BEGIN IMMEDIATE`, enable foreign keys, and explicitly remove orphan rows during cleanup.
+
+The default local database lives under `.data/`, which is ignored. It is a fallback for tests/local development, not production deployment storage.
 
 ## Content separation
 

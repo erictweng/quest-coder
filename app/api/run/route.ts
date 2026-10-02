@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     // Everything that can reject a request happens before the runner is asked to execute anything.
     const session = await currentSession();
     if (!session) return NextResponse.json({ error: "Sign in before running code.", code: "unauthorized" }, { status: 401 });
-    const limit = runLimit(session.tokenHash);
+    const limit = runLimit(session.rateLimitKey);
     if (!limit.allowed) {
       return NextResponse.json({ error: `Too many runs. Try again in ${limit.retryAfterSeconds}s.`, code: "rate_limited" }, { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } });
     }
@@ -27,12 +27,12 @@ export async function POST(request: Request) {
     const pack = loadQuestPack(payload.packSlug);
     const challenge = findChallenge(pack, payload.challengeId);
     const required = challenge.unlock?.requiresQuestIds ?? [];
-    const { cleared } = readServerProgress(session.tokenHash);
+    const { cleared } = await readServerProgress(session.progressKey);
     if (required.some((id) => !cleared[id])) {
       return NextResponse.json({ error: "Clear the previous quest with Submit all first.", code: "prerequisite_locked" }, { status: 409 });
     }
 
-    const slot = runnerTime.begin(session.tokenHash);
+    const slot = runnerTime.begin(session.rateLimitKey);
     if (!slot.allowed) {
       const error = slot.reason === "busy" ? "Your previous run is still in progress." : `You have used your runner time for now. Try again in ${slot.retryAfterSeconds}s.`;
       return NextResponse.json({ error, code: "rate_limited" }, { status: 429, headers: { "retry-after": String(slot.retryAfterSeconds) } });
@@ -42,20 +42,20 @@ export async function POST(request: Request) {
     try {
       result = await submitToRunner(payload);
     } finally {
-      runnerTime.end(session.tokenHash, Date.now() - startedAt);
+      runnerTime.end(session.rateLimitKey, Date.now() - startedAt);
     }
 
     let reward: RewardGrant | null = null;
     if (payload.mode === "submit" && result.passed === true) {
       const isBoss = challenge.id === pack.boss.id;
-      reward = applyAuthoritativeClear(session.tokenHash, {
+      reward = (await applyAuthoritativeClear(session.progressKey, {
         challengeId: challenge.id,
         baseXp: challenge.rewards?.xp ?? 0,
         shards: challenge.rewards?.shards ?? 0,
         hintMultiplier: pack.rewards?.xp?.hintAssistedMultiplier,
         solutionMultiplier: pack.rewards?.xp?.solutionAssistedMultiplier,
         review: isBoss && pack.review?.enabled ? { packSlug: pack.slug, topic: pack.concepts[0] ?? pack.title, schedule: pack.review.defaultSchedule } : undefined
-      }).grant;
+      })).grant;
     }
     return NextResponse.json({
       ...result,
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       challenge: { id: challenge.id, title: challenge.title },
       mode: payload.mode,
       reward,
-      progress: serverOwned(readServerProgress(session.tokenHash)),
+      progress: serverOwned(await readServerProgress(session.progressKey)),
       security: { profile: "isolated-runner-service-v1", grading: "authoritative-execution", fallback: "disabled" }
     });
   } catch (error) {
