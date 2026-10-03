@@ -38,7 +38,22 @@ NEXT_PUBLIC_SITE_URL=https://<production-host>
 
 The existing runner variables are still required. `QUEST_CODER_DATABASE_PATH` is ignored in Supabase mode and remains available only for local SQLite fallback.
 
-## 4. Email template options
+## 4. Google sign-in (optional, recommended)
+
+The **Continue with Google** button appears only in Supabase mode. It calls `/auth/google`, which starts a PKCE OAuth flow; Google returns through Supabase to `/auth/callback`, which already exchanges the code for a session. No email is sent.
+
+1. In Google Cloud Console → **APIs & Services → OAuth consent screen**, configure the app (External, app name, support email; scopes `openid`, `email`, `profile` only).
+2. **Credentials → Create credentials → OAuth client ID → Web application.**
+   - Authorized JavaScript origins: `https://quest-coder.vercel.app`
+   - Authorized redirect URI: the **Callback URL** shown in Supabase → Authentication → Sign In / Providers → Google (`https://<project-ref>.supabase.co/auth/v1/callback`). Not the app's `/auth/callback`.
+3. In Supabase → **Authentication → Sign In / Providers → Google**, enable it and paste the Client ID and Client Secret. The secret lives only in Supabase; Quest Coder needs no new environment variables.
+4. Keep `https://quest-coder.vercel.app/auth/callback` in Supabase's redirect allow-list (already required for email links).
+
+Google supplies `full_name`, which becomes the display name. Supabase links a Google identity to an existing account with the same verified email, so an earlier magic-link save carries over.
+
+Vercel preview deployments still redirect back to the production `NEXT_PUBLIC_SITE_URL`, so test OAuth sign-in on production (or a preview with its own `NEXT_PUBLIC_SITE_URL` and an allow-listed callback).
+
+## 5. Email template options
 
 The normal PKCE magic-link flow redirects to `/auth/callback` with a `code`. If a customized email template emits a token hash, direct it to:
 
@@ -48,7 +63,7 @@ The normal PKCE magic-link flow redirects to `/auth/callback` with a `code`. If 
 
 Use the appropriate Supabase template type when customizing signup, invite, recovery, or email-change messages.
 
-## 5. Verify
+## 6. Verify
 
 - Request a link from the production sign-in form and complete it in the same browser.
 - Confirm `/api/session` reports `provider: "supabase"` and the authenticated email-derived profile name.
