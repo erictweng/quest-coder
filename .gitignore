@@ -17,6 +17,7 @@ tsconfig.tsbuildinfo
 coverage/
 playwright-report/
 test-results/
+artifacts/
 
 # Generated QA evidence (selected release screenshots may be force-added)
 docs/*verification*.png

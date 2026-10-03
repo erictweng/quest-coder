@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  trusted-slice:
+  quality-and-runner:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -28,16 +28,94 @@ jobs:
       - run: npm run test:runner
       - name: Verify hardened runner container
         run: scripts/ci_runner_container.sh
-      - run: npx playwright install --with-deps chromium
-      # Builds the app, then drives the production build in a browser.
-      - run: npm run test:e2e
+      - run: npm run build
+      - run: npm run test:privacy
       - run: npm audit --omit=dev
+
+  chromium-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run test:e2e:accessibility
       - name: Upload browser failures
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-failures
+          name: playwright-chromium-failures
           path: |
             playwright-report/
             test-results/
           if-no-files-found: ignore
+
+  focused-browser-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium-smoke
+            browser: chromium
+          - project: firefox-smoke
+            browser: firefox
+          - project: webkit-smoke
+            browser: webkit
+          - project: mobile-chromium-smoke
+            browser: chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: QUEST_CODER_E2E_DEV_SERVER=1 npx playwright test --project=${{ matrix.project }}
+      - name: Upload browser failures
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-${{ matrix.project }}-failures
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+
+  release-evidence:
+    if: always() && needs.quality-and-runner.result == 'success' && needs.chromium-e2e.result == 'success' && needs.focused-browser-smoke.result == 'success'
+    needs: [quality-and-runner, chromium-e2e, focused-browser-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - name: Write machine-readable test provenance
+        run: npm run test:provenance -- --verified lint,packs,privacy,unit,runner,runner-container,build,chromium-full,chromium-smoke,firefox-smoke,webkit-smoke,mobile-chromium-smoke,axe,audit
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-provenance-${{ github.sha }}
+          path: artifacts/test-provenance.json
+          if-no-files-found: error

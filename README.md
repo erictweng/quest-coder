@@ -42,12 +42,24 @@ npm run lint          # tsc, including unused code
 npm run test:packs    # public projection matches content/server
 npm run test:unit     # progress store, rate limiter, client helpers
 npm run test:runner   # Python engine and trust boundary
-npx playwright install chromium
-npm run test:e2e      # builds, then drives the production build
+npm run build         # production client/server build
+npm run test:privacy  # tracked packs, public projections, client chunks
+npx playwright install chromium firefox webkit
+npm run test:e2e                # full desktop Chromium trusted slice
+npm run test:e2e:smoke          # focused Chromium/Firefox/WebKit/mobile matrix
+npm run test:e2e:accessibility  # axe on hub, solve screen, and notebook
 npm audit --omit=dev
 ```
 
-`npm run test:trusted-slice` runs all of the above except the audit.
+`npm run test:trusted-slice` runs the repository checks above except the runner-container check and audit. CI also uploads machine-readable test provenance containing the git SHA, runtime versions, suite counts, and timestamp. Generated evidence is ignored rather than committed.
+
+## Release state
+
+- **Locally/CI verified:** pack projection, privacy boundary, unit/runner/container behavior, production build, full Chromium journey, focused Chromium/Firefox/WebKit/mobile smoke, and axe checks.
+- **Supabase setup pending:** the project, migration, redirects, RLS, and service-role functions must be verified on the chosen provider.
+- **Private production fixture pending:** create a newly rotated pack outside git; the committed fixture is non-production only.
+- **External runner deployment pending:** prove TLS, allowlisting, outbound deny, read-only storage, and provider resource limits.
+- **Public launch not ready:** the safe deployment smoke and authenticated/manual provider checks must pass against the real release URL.
 
 ## Deployment model
 
@@ -59,4 +71,4 @@ npm audit --omit=dev
 - Never expose the runner token through `NEXT_PUBLIC_*` variables.
 - Do not deploy durable SQLite on an ephemeral serverless filesystem; mount a durable volume or replace the repository with a managed database before multi-instance hosting.
 
-See `docs/PRIVATE_RUNNER_PACK.md`, `docs/DEPLOYMENT.md`, `docs/SECURITY_REVIEW.md`, and `docs/TRUSTED_CLIMBING_STAIRS_SLICE.md`.
+See `docs/PRIVATE_RUNNER_PACK.md`, `docs/DEPLOYMENT.md`, `docs/SECURITY_REVIEW.md`, `docs/RELEASE_VERIFICATION.md`, and `docs/TRUSTED_CLIMBING_STAIRS_SLICE.md`.

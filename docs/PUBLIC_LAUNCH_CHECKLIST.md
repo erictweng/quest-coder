@@ -2,7 +2,7 @@
 
 ## Current launch level
 
-**Private/link beta only. Search indexing remains disabled.** The application now has a trusted vertical-slice contract, but unrestricted public traffic still requires deployment-time sandbox and durable-database proof.
+**Private/link beta only. Search indexing remains disabled.** Repository checks are locally/CI verifiable, but Supabase setup, a rotated production private pack, external runner deployment, and provider-side release checks are still pending. Public launch is not ready.
 
 ## Verified in repository
 
@@ -14,6 +14,10 @@
 - [x] Playwright completes all four Climbing Stairs stages and verifies reload persistence.
 - [x] Dependencies and runtimes are pinned.
 - [x] GitHub Actions runs typecheck, runner tests, build, Playwright, and audit.
+- [x] Focused Chromium, Firefox, WebKit, and mobile Chromium smoke covers sign-in, personal save visibility, notebook keyboard close, editing, Run basic, and viewport overflow.
+- [x] Axe covers the hub, solve screen, and open notebook with no WCAG category disabled.
+- [x] Automated privacy checks inspect tracked packs, public projections, and production client chunks.
+- [x] CI uploads uncommitted machine-readable provenance with SHA, runtimes, suite counts, and timestamp.
 - [x] `robots.txt` blocks indexing unless explicitly enabled.
 
 ## Required before unrestricted public traffic
@@ -25,8 +29,9 @@
 - [ ] Put runner traffic behind TLS, app allowlisting, and a rotated server-only token.
 - [ ] Select durable managed persistence or a durable single-instance volume.
 - [ ] Add distributed queue/rate limiting before horizontal scaling.
-- [ ] Run the post-deploy Playwright smoke against the real URL.
-- [ ] Manually check mobile editor, Quest Notebook, replay, and completion flow.
+- [ ] Complete and verify the production Supabase project, migration, redirects, RLS, and service-role functions.
+- [ ] Set `DEPLOYMENT_SMOKE_URL` and manually dispatch the safe deployment smoke against the real URL.
+- [ ] Complete the authenticated successful-run, progress-isolation, mobile, replay, and completion checks in `docs/RELEASE_VERIFICATION.md`.
 
 ## Post-deploy functional checks
 
@@ -38,6 +43,8 @@
 - [ ] Hidden tests are absent from browser chunks and API payloads.
 - [ ] Sign-in progress survives reload and cannot be read by another anonymous session.
 - [ ] Runner unavailability produces a visible retryable error with no stale success state.
+
+The unauthenticated deployment smoke checks HTTPS, health, headers, anonymous rejection, malformed/traversal rejection, and private-path unreachability without accepting or printing credentials. Successful submissions and Supabase ownership checks remain authenticated/manual by design.
 
 ## Rollback
 

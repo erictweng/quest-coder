@@ -87,9 +87,23 @@ npm run lint
 npm run test:packs
 npm run test:unit
 npm run test:runner
-npx playwright install chromium
+npm run build
+npm run test:privacy
+npx playwright install chromium firefox webkit
 npm run test:e2e
+npm run test:e2e:smoke
+npm run test:e2e:accessibility
 npm audit --omit=dev
 ```
 
-After deployment, verify `/api/health`, a correct submission, an incorrect `return 999` submission, blocked/traversal input, hidden-case redaction, progress after reload, and runner-unavailable behavior.
+The repository/CI gate above is verified independently from provider setup. Production still requires a configured Supabase project and migration, a newly rotated private pack, and an externally isolated runner.
+
+For a safe unauthenticated post-deploy check, set the repository variable `DEPLOYMENT_SMOKE_URL` and manually dispatch `.github/workflows/deployment-smoke.yml`, or run:
+
+```bash
+npm run smoke:deployment -- https://app.example.com
+```
+
+The script requires HTTPS except on localhost, checks `/api/health`, security headers, anonymous API rejection, malformed/traversal rejection, and private-path unreachability. It never accepts or prints secrets and does not run automatically for pull requests or production deploys.
+
+Correct/incorrect submissions, Supabase ownership/RLS, progress after reload, and runner-unavailable UI behavior require an authenticated test account and are documented separately in `docs/RELEASE_VERIFICATION.md`. Public launch is not ready until those provider-side checks pass.

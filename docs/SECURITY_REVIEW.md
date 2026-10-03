@@ -59,6 +59,8 @@ Automated tests prove:
 - an unavailable/misconfigured runner fails closed;
 - progress is isolated behind an HttpOnly anonymous session.
 - missing/invalid private packs fail closed, streamed request/response caps cancel early, usage-limiter key storage remains bounded, and the hardened container runs non-root with a read-only root and internal network.
+- tracked/private-pack privacy checks fail on unexpected `.private` or private-schema files, public solution/hint/submit material, and known server-only content in production client chunks.
+- focused Chromium, Firefox, WebKit, and mobile Chromium coverage exercises the signed-in save/notebook/editor/Run path and viewport width; axe checks the hub, solve screen, and notebook without disabling WCAG categories.
 
 ## Remaining launch conditions
 
@@ -68,3 +70,6 @@ Before unrestricted public traffic:
 2. Replace local SQLite or mount a durable single-instance volume.
 3. Add shared rate limiting/queueing for horizontally scaled deployments.
 4. Run external abuse tests for network, filesystem, fork/PID, memory, CPU, timeout, oversized output, and cancellation behavior.
+5. Complete Supabase provider verification, mount a newly rotated production fixture, run the explicit deployment smoke, and record authenticated release evidence from `docs/RELEASE_VERIFICATION.md`.
+
+These are launch blockers, not repository test failures: the code is locally/CI verified, while Supabase setup, production fixture creation, and external runner deployment remain pending.
