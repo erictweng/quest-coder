@@ -43,6 +43,18 @@ fi
 RUNNER_SA="${RUNNER_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/runner:$(git rev-parse --short HEAD)"
 step() { printf '\n==> %s\n' "$*"; }
+# Newly created service accounts take up to a minute to become visible to IAM, so grants
+# right after creation fail with "does not exist". Retry for up to ~2 minutes.
+retry_iam() {
+  local attempt output
+  for attempt in $(seq 1 12); do
+    if output="$("$@" 2>&1 >/dev/null)"; then return 0; fi
+    if ! printf '%s' "$output" | grep -qiE 'does not exist|not found'; then printf '%s\n' "$output" >&2; return 1; fi
+    echo "Waiting for the new service account to propagate (attempt ${attempt}/12)..." >&2
+    sleep 10
+  done
+  printf '%s\n' "$output" >&2; return 1
+}
 
 step "Project ${PROJECT_ID}, region ${REGION}"
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
@@ -80,8 +92,8 @@ else
   echo "Reusing the existing token (set ROTATE_TOKEN=1 to rotate)."
 fi
 for secret in "$PACK_SECRET" "$TOKEN_SECRET"; do
-  gcloud secrets add-iam-policy-binding "$secret" --member "serviceAccount:${RUNNER_SA}" \
-    --role roles/secretmanager.secretAccessor --project "$PROJECT_ID" >/dev/null
+  retry_iam gcloud secrets add-iam-policy-binding "$secret" --member "serviceAccount:${RUNNER_SA}" \
+    --role roles/secretmanager.secretAccessor --project "$PROJECT_ID"
 done
 
 step "Outbound-network deny (Direct VPC egress through a network with no NAT)"
@@ -100,8 +112,8 @@ step "Build image ${IMAGE}"
 BUILD_SA="${BUILD_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 gcloud iam service-accounts describe "$BUILD_SA" --project "$PROJECT_ID" >/dev/null 2>&1 \
   || gcloud iam service-accounts create "$BUILD_SA_NAME" --display-name "Quest Coder image builder" --project "$PROJECT_ID"
-gcloud projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:${BUILD_SA}" \
-  --role roles/cloudbuild.builds.builder --condition None >/dev/null
+retry_iam gcloud projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:${BUILD_SA}" \
+  --role roles/cloudbuild.builds.builder --condition None
 built=0
 for attempt in 1 2 3; do
   if gcloud builds submit --config runner/service/cloudbuild.yaml --substitutions "_IMAGE=${IMAGE}" \
