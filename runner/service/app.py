@@ -41,9 +41,11 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
-        if self.path not in {"/healthz", "/readyz"}:
+        # /health and /ready are the canonical paths. Cloud Run's front end reserves paths
+        # ending in "z" and answers them itself, so /healthz and /readyz are local-only aliases.
+        if self.path not in {"/health", "/ready", "/healthz", "/readyz"}:
             return self.reply(404, {"error": "not found"})
-        if self.path == "/readyz" and not self.authorized():
+        if self.path in {"/ready", "/readyz"} and not self.authorized():
             return self.reply(401, {"error": "unauthorized", "code": "unauthorized"})
         self.reply(200, {"status": "ok", "version": "runner-service-v1"})
 
