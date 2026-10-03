@@ -1,0 +1,9 @@
+# Builds the hardened runner image from runner/service/Dockerfile and pushes it to Artifact Registry.
+# Used by scripts/deploy_runner_cloud_run.sh: gcloud builds submit --config runner/service/cloudbuild.yaml --substitutions=_IMAGE=...
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "runner/service/Dockerfile", "-t", "${_IMAGE}", "."]
+images:
+  - "${_IMAGE}"
+options:
+  logging: CLOUD_LOGGING_ONLY

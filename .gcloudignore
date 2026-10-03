@@ -1,0 +1,16 @@
+# Upload only what the runner image needs. Never upload private packs, env files or local data.
+.git
+.gitignore
+.private/
+.data/
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+playwright-report/
+test-results/
+artifacts/
+docs/
+public/
+build-map/

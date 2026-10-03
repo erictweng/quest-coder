@@ -4,6 +4,14 @@ Authoritative grading data uses `quest-private-pack.v1` and must live outside gi
 
 The previous authoritative pack was committed historically. Treat every old hidden case and expected value as disclosed; production must use newly rotated/replaced cases.
 
+## Generate a production pack (recommended)
+
+```bash
+python3 scripts/private_pack.py generate-cases /path/outside/git/pack.json
+```
+
+Keeps the public Run cases (also used for the replay animation) and adds 8 freshly drawn private Submit cases per challenge, within each quest's stated constraints and always including the edges. Expected values come from an independent oracle, not from the reference solutions. The file is written owner-only (0600), validated, and never printed. `scripts/deploy_runner_cloud_run.sh` runs this in Cloud Shell and stores the result directly in Secret Manager.
+
 ## Case-free template workflow
 
 ```bash
