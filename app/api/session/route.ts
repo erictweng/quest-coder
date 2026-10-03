@@ -7,6 +7,7 @@ import { clientAddress } from "../../../lib/client-address";
 import { currentSession, SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from "../../../lib/session";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { JsonRequestError, readCappedJson } from "../../../lib/read-json-request";
+import { describeMagicLinkError } from "../../../lib/supabase/auth-errors";
 
 const HOUR_MS = 60 * 60_000;
 const newSessionsPerAddress = createRateLimiter({ limit: 30, windowMs: HOUR_MS });
@@ -57,7 +58,12 @@ async function requestMagicLink(request: Request, body: { email?: unknown }) {
     email,
     options: { emailRedirectTo: `${origin}/auth/callback` }
   });
-  if (error) return NextResponse.json({ error: "Could not send the sign-in link." }, { status: 400 });
+  if (error) {
+    const failure = describeMagicLinkError(error);
+    // Log only Supabase's error code/status, never the email address.
+    console.error("supabase signInWithOtp failed", { code: failure.code, status: (error as { status?: number }).status ?? null, name: error.name });
+    return NextResponse.json({ error: failure.message, code: failure.code }, { status: failure.status });
+  }
   return NextResponse.json({ pending: true, message: "Check your email for a secure sign-in link." });
 }
 
