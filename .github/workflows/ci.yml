@@ -28,6 +28,8 @@ jobs:
       - run: npm run test:runner
       - name: Verify hardened runner container
         run: scripts/ci_runner_container.sh
+      - name: Check Cloud Run deploy script syntax
+        run: bash -n scripts/deploy_runner_cloud_run.sh
       - run: npm run build
       - run: npm run test:privacy
       - run: npm audit --omit=dev

@@ -47,6 +47,28 @@ Use `npm ci`, not `npm install`, for reproducible deployment from the lockfile.
 
 ## Runner deployment
 
+### Google Cloud Run (supported path)
+
+From the repository root in **Google Cloud Shell**:
+
+```bash
+gcloud config set project <project-id>
+scripts/deploy_runner_cloud_run.sh
+```
+
+The script enables the required APIs, creates an Artifact Registry repo and a dedicated service account with no project roles, generates a fresh hidden-case pack and a random token **directly into Secret Manager** (neither is printed or committed), builds `runner/service/Dockerfile` with Cloud Build, and deploys `quest-coder-runner` with:
+
+- gen2 sandbox, 1 CPU / 512 MiB, concurrency 4, 0–3 instances, 15 s request timeout;
+- the pack mounted as a secret file and the token as a secret env var;
+- Direct VPC egress through the `default` network with no Cloud NAT, so submitted code cannot reach the internet (the script refuses to deploy if a NAT exists in the region);
+- public HTTPS ingress, with every run gated by the bearer token.
+
+It then smoke-tests the live URL: health, missing-token rejection, a correct Submit passing, and a solution hard-coded to the public examples passing Run but failing Submit. Finally it prints the two Vercel variables to set. `ROTATE_PACK=1` draws new hidden cases; `ROTATE_TOKEN=1` issues a new token (update Vercel afterwards).
+
+Known differences from `compose.yaml`: Cloud Run's filesystem is writable in-memory rather than read-only, and caller allowlisting is not possible because Vercel egress IPs are not fixed. The token gate and Google's sandbox are the boundary.
+
+### Other hosts
+
 Build from `runner/service/Dockerfile`. Its Python base is pinned by registry digest and explicit `COPY` paths omit `runner/tests/fixtures`. `compose.yaml` demonstrates a read-only container, non-root user, dropped capabilities, no-new-privileges, PID/memory/CPU limits, a bounded tmpfs, an internal network, and a read-only secret mount. CI builds and starts this image and verifies those boundaries.
 
 `QUEST_CODER_PRIVATE_PACK_PATH` is mandatory. For Compose, set `QUEST_CODER_PRIVATE_PACK_FILE` to a host-side rotated pack; Compose mounts it at `/run/secrets/quest_coder_private_pack`. The runner exits before listening if the file is absent or invalid.
