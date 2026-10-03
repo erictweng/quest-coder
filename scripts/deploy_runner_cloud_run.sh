@@ -21,6 +21,7 @@ REPOSITORY="quest-coder"
 PACK_SECRET="quest-coder-private-pack"
 TOKEN_SECRET="quest-coder-runner-token"
 RUNNER_SA_NAME="quest-coder-runner"
+BUILD_SA_NAME="quest-coder-builder"
 
 [ -n "$PROJECT_ID" ] || { echo "Set a project first: gcloud config set project <project-id>" >&2; exit 1; }
 [ -f runner/service/Dockerfile ] || { echo "Run this from the quest-coder repository root." >&2; exit 1; }
@@ -94,7 +95,23 @@ if gcloud compute routers list --project "$PROJECT_ID" --filter "region:${REGION
 fi
 
 step "Build image ${IMAGE}"
-gcloud builds submit --config runner/service/cloudbuild.yaml --substitutions "_IMAGE=${IMAGE}" --project "$PROJECT_ID" .
+# New projects run Cloud Build as the Compute Engine default account, which has no roles and
+# cannot read the uploaded source. Use a dedicated build account with only the builder role.
+BUILD_SA="${BUILD_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+gcloud iam service-accounts describe "$BUILD_SA" --project "$PROJECT_ID" >/dev/null 2>&1 \
+  || gcloud iam service-accounts create "$BUILD_SA_NAME" --display-name "Quest Coder image builder" --project "$PROJECT_ID"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:${BUILD_SA}" \
+  --role roles/cloudbuild.builds.builder --condition None >/dev/null
+built=0
+for attempt in 1 2 3; do
+  if gcloud builds submit --config runner/service/cloudbuild.yaml --substitutions "_IMAGE=${IMAGE}" \
+      --service-account "projects/${PROJECT_ID}/serviceAccounts/${BUILD_SA}" --project "$PROJECT_ID" .; then
+    built=1; break
+  fi
+  # New IAM grants can take a minute to apply.
+  [ "$attempt" -lt 3 ] && { echo "Build failed (attempt ${attempt}/3); waiting 45s for permissions to apply..." >&2; sleep 45; }
+done
+[ "$built" = 1 ] || { echo "Image build failed after 3 attempts." >&2; exit 1; }
 
 step "Deploy ${SERVICE}"
 gcloud run deploy "$SERVICE" \
