@@ -1,5 +1,14 @@
 import type { Metadata } from "next";
+import { Pixelify_Sans } from "next/font/google";
+import { MEDIEVAL } from "../components/medieval/tokens";
 import "./globals.css";
+
+// One pixel font for all UI text (OFL). next/font self-hosts it, so browsers never call Google Fonts.
+// Code keeps the system monospace font (see globals.css).
+const pixelify = Pixelify_Sans({ subsets: ["latin"], display: "swap", variable: "--mq-font" });
+
+// Palette variables (--mq-stone, --mq-gold, ...) come from the single token source.
+const paletteVars = Object.fromEntries(Object.entries(MEDIEVAL).map(([name, value]) => [`--mq-${name}`, value])) as React.CSSProperties;
 
 export const metadata: Metadata = {
   title: "Quest Coder",
@@ -16,7 +25,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className={pixelify.variable} style={paletteVars}>{children}</body>
     </html>
   );
 }
