@@ -45,7 +45,7 @@ export function StatBar({ label, value, max, color, unit = "" }: { label: string
   );
 }
 
-export type QuestState = "cleared" | "available" | "locked";
+export type QuestState = "cleared" | "available" | "locked" | "review";
 
 /** Status with an icon and a word: readable without colour. */
 export function QuestStatus({ state, tone = "parchment" }: { state: QuestState; tone?: "parchment" | "stone" }) {
@@ -53,7 +53,8 @@ export function QuestStatus({ state, tone = "parchment" }: { state: QuestState; 
   const config = {
     cleared: { icon: "check" as const, text: "Cleared", color: onParchment ? "var(--mq-inkEmerald)" : "var(--mq-emerald)" },
     available: { icon: "scroll" as const, text: "Available", color: onParchment ? "var(--mq-inkSapphire)" : "var(--mq-sapphire)" },
-    locked: { icon: "lock" as const, text: "Locked", color: onParchment ? "var(--mq-inkMuted)" : "var(--mq-textMuted)" }
+    locked: { icon: "lock" as const, text: "Locked", color: onParchment ? "var(--mq-inkMuted)" : "var(--mq-textMuted)" },
+    review: { icon: "banner" as const, text: "Rematch due", color: onParchment ? "var(--mq-inkRuby)" : "var(--mq-ruby)" }
   }[state];
   return <span className="mq-status" style={{ color: config.color }}><PixelSprite name={config.icon} scale={2} />{config.text}</span>;
 }

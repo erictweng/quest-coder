@@ -1,6 +1,6 @@
 # Medieval Pixel MMO Redesign — Implementation Plan
 
-> Each milestone is its own PR with desktop and mobile screenshots, and stops for review before the next one starts. Status: **M0 (style tile) approved. "Apply the design" pass done** (see §6).
+> Each milestone is its own PR with desktop and mobile screenshots, and stops for review before the next one starts. Status: **M0 approved; app-wide look applied (§6); M3 town hub built (§7).** Next: M4 solve screen.
 
 **Goal:** Reskin Quest Coder as a medieval, pixel-art MMO RPG (town hub, world map, quest board, character sheet, action-bar HUD, loot and level-up moments) without making reading problems or writing code harder.
 
@@ -137,3 +137,13 @@ Eric approved the style tile and asked to apply it app-wide. Done in one pass:
 - Rename the remapped utilities to semantic names (`cyan` currently means gold).
 - Problem text on parchment instead of oak.
 - Structural pieces not yet in the app: illustrated world map, pinned quest-board notices, HUD XP bar on the solve screen, loot toast and level-up banner, castle-staircase replay.
+
+## 7. M3: Town hub (built)
+
+The hub is now the screen from the style tile, built from real progress data:
+
+- **Character sheet** (`components/hub/character-sheet.tsx`): name, level and title, an XP bar toward the next level, total XP, shards, quests cleared, bosses defeated and rematches due. Levels are display-only, derived from XP in `lib/levels.ts`: reaching level L takes 10·(L−1)·(L+4) XP, so clearing the Forest of Patience (210 XP) reaches Lv 3 Journeyman.
+- **World map** (`components/hub/world-map.tsx`): region nodes with progress and a boss gate per region (locked, open, or defeated), and fog for regions that don't exist yet. It has two slots; any further regions are listed below the map.
+- **Quest board** (`components/hub/quest-board.tsx`): parchment notices with status (icon and word: Available, Cleared, Locked, Rematch due), brief, XP reward, and the unlock reason when locked. The boss encounter card sits beneath them.
+- The header no longer carries the metric grid and stat bar; they moved to the Profile page, so nothing was lost. Nav and button names are unchanged.
+- Hub components are presentational (`components/hub/types.ts` view models); the page computes them with `toHubQuest`. This is the first piece of the M2 split.

@@ -287,7 +287,10 @@ test("401 cleanup removes profile, help, result, reward and attempt state", asyn
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByTestId("completion-floating-panel")).toHaveCount(0);
   await expect(page.getByText("Expired Ranger")).toHaveCount(0);
-  await expect(page.getByText(/25 XP/)).toHaveCount(0);
+  // Earned XP is gone. (Quest notices legitimately show fixed reward labels such as "25 XP" and "125 XP".)
+  await expect(page.getByText(/\+25 XP/)).toHaveCount(0);
+  await expect(page.getByText("25 XP total")).toHaveCount(0);
+  await expect(page.getByTestId("character-sheet")).toContainText("0 XP total");
 });
 
 test("non-JSON gateway failures show retry guidance instead of parser errors", async ({ page }) => {
@@ -467,4 +470,33 @@ test("the design style tile is not served by the production build", async ({ pag
   const response = await page.goto("/styleguide");
   expect(response?.status()).toBe(404);
   await expect(page.getByRole("heading", { name: "Quest Coder", level: 1 })).toHaveCount(0);
+});
+
+test("town hub: notices open quests, locks are explained, and the character sheet levels up", async ({ page }) => {
+  await signIn(page, "Hub Ranger");
+  const sheet = page.getByTestId("character-sheet");
+  await expect(sheet).toContainText("Level 1 · Squire");
+  await expect(sheet).toContainText("0/1 bosses defeated");
+
+  const board = page.getByRole("region", { name: "Quest board" });
+  const map = page.getByRole("region", { name: "World map" });
+  // Quest 2 and the boss are locked, show the word "Locked" and explain why.
+  await expect(board.getByRole("button", { name: new RegExp(path[1].title) })).toBeDisabled();
+  await expect(board.getByRole("button", { name: new RegExp(path[1].title) })).toContainText("Locked");
+  await expect(board.getByRole("button", { name: /Boss encounter/ })).toBeDisabled();
+  await expect(board.getByRole("button", { name: /Boss encounter/ })).toContainText("Clear all 3 quests to open the gate");
+  await expect(map.getByRole("button", { name: `${pack.boss.title}: boss gate locked` })).toBeDisabled();
+
+  // The available notice opens its quest; clearing it unlocks the next notice and adds XP.
+  await board.getByRole("button", { name: new RegExp(path[0].title) }).click();
+  await expect(page.getByRole("heading", { name: path[0].title })).toBeVisible();
+  await submitAndAdvance(page, path[0]);
+  await page.getByRole("button", { name: "Home" }).click();
+  await expect(board.getByRole("button", { name: new RegExp(path[0].title) })).toContainText("Cleared");
+  await expect(board.getByRole("button", { name: new RegExp(path[1].title) })).toBeEnabled();
+  await expect(sheet).toContainText(`${path[0].rewards.xp} XP total`);
+
+  // The map's region node opens the region page.
+  await map.getByRole("button", { name: new RegExp(pack.title) }).click();
+  await expect(page.getByRole("button", { name: "Back to campaigns" })).toBeVisible();
 });
