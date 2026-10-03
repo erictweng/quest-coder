@@ -154,7 +154,8 @@ correct = "class Solution:\n    def climbStairs(self, n: int) -> int:\n        a
 hardcoded = "class Solution:\n    def climbStairs(self, n: int) -> int:\n        return {2: 2, 5: 8}.get(n, 0)\n"
 run = lambda source, mode, auth=True: call("/v1/runs", {"source": source, "packSlug": "forest-of-patience-climbing-stairs", "challengeId": "boss-old-bramblehorn", "mode": mode}, auth)
 checks = [
-    ("health", call("/healthz", auth=False)[0] == 200),
+    ("health", call("/health", auth=False)[0] == 200),
+    ("ready check accepts the token", call("/ready")[0] == 200),
     ("no token is rejected", run(correct, "run", auth=False)[0] == 401),
     ("correct solution passes Submit", run(correct, "submit")[1].get("passed") is True),
     ("hard-coded examples pass Run", run(hardcoded, "run")[1].get("passed") is True),

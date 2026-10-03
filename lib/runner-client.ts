@@ -53,7 +53,8 @@ export async function runnerHealth(): Promise<{ available: boolean; mode: string
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1500);
   try {
-    const response = await fetch(`${baseUrl}/readyz`, { headers: { authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" });
+    // Not /readyz: Cloud Run reserves paths ending in "z".
+    const response = await fetch(`${baseUrl}/ready`, { headers: { authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" });
     const value = response.ok ? safeJson(await readCappedResponse(response)) : {};
     return { available: response.ok, mode: "external-service", version: typeof value.version === "string" ? value.version : undefined };
   } catch { return { available: false, mode: "external-service" }; }
