@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CompletionMoment } from "../components/completion-moment";
 import { ResultSummary } from "../components/result-summary";
 import { PixelSprite } from "../components/medieval/sprites";
+import { CharacterSheet } from "../components/hub/character-sheet";
+import { QuestBoard } from "../components/hub/quest-board";
+import type { HubQuest, HubRegion } from "../components/hub/types";
+import { WorldMap } from "../components/hub/world-map";
 import climbingStairsPack from "../content/public/forest-of-patience-climbing-stairs.json";
 import { appendAttempt, attemptFromFailure, attemptFromResult, describeAttempt, type AttemptRecord } from "../lib/attempts";
 import { mergeRevisionRecord, mergeServerSnapshot, shouldApplyServerSnapshot, validLastChallengeId } from "../lib/client-progress";
@@ -237,6 +241,13 @@ export default function Home() {
   const activePack = PACK_BY_SLUG[activeChallenge.packSlug];
   const selectedPack = PACK_BY_SLUG[selectedPackSlug] ?? DEFAULT_PACK;
   const bossUnlocked = activePack.boss.unlock.requiresQuestIds.every((id) => progress.cleared[id]);
+  const hubRegions: HubRegion[] = PACKS.map((pack) => {
+    const challenges = [...pack.quests, pack.boss];
+    return { slug: pack.slug, title: pack.title, cleared: challenges.filter((challenge) => progress.cleared[challenge.id]).length, total: challenges.length, boss: toHubQuest(CHALLENGE_BY_ID[pack.boss.id], progress, dueReviews.some((item) => item.record.bossId === pack.boss.id)) };
+  });
+  const hubPack = PACK_BY_SLUG[activeChallenge.packSlug] ?? DEFAULT_PACK;
+  const hubQuests: HubQuest[] = hubPack.quests.map((quest) => toHubQuest(CHALLENGE_BY_ID[quest.id], progress, false));
+  const hubBoss = hubRegions.find((region) => region.slug === hubPack.slug)?.boss ?? toHubQuest(CHALLENGE_BY_ID[hubPack.boss.id], progress, false);
   const isActiveLocked = !isUnlocked(activeChallenge, progress);
   const activePath = useMemo(() => [...activePack.quests, activePack.boss] as BaseChallenge[], [activePack]);
   const nextChallenge = useMemo(() => {
@@ -714,16 +725,6 @@ export default function Home() {
                 <button className={surface === "questions" ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setSurface("questions")}>Questions</button>
                 <button className="control" onClick={() => setSurface("solve")}>Solve</button>
               </nav>
-              <div className="mt-4 grid gap-2 text-sm sm:grid-cols-4">
-                <Metric label="Streak/rating" value={`${topicStats[0]?.streak ?? 0}/${topicStats[0]?.rating ?? 1000}`} />
-                <Metric label="Bosses defeated" value={statBar.label} />
-                <Metric label="Active quest" value={activeChallenge.title} />
-                <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
-                <Metric label="Reviews due" value={`${dueReviews.length}`} />
-                <Metric label="XP" value={`${progress.rewards.xp}`} />
-                <Metric label="Shards" value={`${progress.rewards.shards}`} />
-              </div>
-              <StatBar stat={statBar} />
             </>
           )}
           {sessionLoading ? <p className="mt-2 text-xs text-cyan-200" role="status" data-testid="session-loading">Loading save…</p> : null}
@@ -731,25 +732,36 @@ export default function Home() {
         </header>
 
         {surface === "hub" ? (
-          <section className="space-y-5">
-            <div className="pixel-dialogue terminal-card rounded-3xl p-5 shadow-xl">
-              <div className="flex items-start gap-4"><div className="terminal-card grid h-16 w-16 flex-none place-items-center p-1"><PixelSprite name="knight" scale={4} /></div><div><h2 className="text-xl font-black text-[var(--qc-gold)]">Sir Patience, your guide</h2><p className="mt-1 text-slate-200">“Pick a quest from the board, brave coder. Your code editor opens when the quest begins.”</p></div></div>
+          <section className="space-y-5" aria-label="Town hub">
+            <div className="pixel-dialogue flex items-center gap-4 p-4">
+              <div className="terminal-card grid h-14 w-14 flex-none place-items-center p-1"><PixelSprite name="knight" scale={3} /></div>
+              <div><h2 className="text-lg font-black text-[var(--qc-gold)]">Sir Patience, your guide</h2><p className="mt-1 text-sm text-slate-200">“Pick a quest from the board, brave coder. Your code editor opens when the quest begins.”</p></div>
             </div>
-            <div className="grid gap-4 lg:grid-cols-3">
-              <button className="neon-maze-panel pixel-button rounded-3xl p-6 text-left shadow-xl hover:bg-cyan-300/10" onClick={() => setSurface("profile")}>
-                <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Profile</p><h2 className="mt-3 text-2xl font-black">Character sheet</h2></div><div className="pellet-node grid h-10 w-10 place-items-center border border-yellow-200/30 bg-yellow-300/10 p-1" aria-hidden="true"><PixelSprite name="knight" scale={2} /></div></div><p className="mt-2 text-sm text-slate-300">Your XP, shards, rematches and recent attempts.</p><p className="mt-4 text-xs text-cyan-100">{progress.rewards.xp} XP · {progress.rewards.shards} Shards · {dueReviews.length} rematches</p>
-              </button>
-              <button className="neon-maze-panel pixel-button rounded-3xl p-6 text-left shadow-xl hover:bg-purple-300/10" onClick={() => setSurface("campaigns")}>
-                <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.3em] text-purple-300">Campaign</p><h2 className="mt-3 text-2xl font-black">World map</h2></div><div className="power-node grid h-10 w-10 place-items-center border border-cyan-200/30 bg-cyan-300/10 p-1" aria-hidden="true"><PixelSprite name="tree" scale={2} /></div></div><p className="mt-2 text-sm text-slate-300">Choose a region of the realm to explore.</p><p className="mt-4 text-xs text-purple-100">{PACKS.length} {PACKS.length === 1 ? "region" : "regions"} · {statBar.label}</p>
-              </button>
-              <button className="terminal-card pixel-button rounded-3xl p-6 text-left shadow-xl hover:bg-yellow-300/10" onClick={() => setSurface("questions")}>
-                <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.3em] text-yellow-300">Questions</p><h2 className="mt-3 text-2xl font-black">Quest board</h2></div><div className="terminal-card grid h-10 w-10 place-items-center p-1" aria-hidden="true"><PixelSprite name="scroll" scale={2} /></div></div><p className="mt-2 text-sm text-slate-300">Take an open quest, a rematch, or a boss fight.</p><p className="mt-4 text-xs text-yellow-100">{CHALLENGES.length} quests and bosses</p>
-              </button>
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[340px_minmax(0,1fr)]">
+              <div className="space-y-4">
+                <CharacterSheet character={{ name: userName, xp: progress.rewards.xp, shards: progress.rewards.shards, questsCleared: CHALLENGES.filter((challenge) => progress.cleared[challenge.id]).length, questsTotal: CHALLENGES.length, bossesLabel: statBar.label, rematchesDue: dueReviews.length }} onOpenProfile={() => setSurface("profile")} />
+                <button className="pixel-button terminal-card w-full p-5 text-left" onClick={() => selectChallenge(activeChallenge.id)}><b className="flex items-center gap-2"><PixelSprite name="sword" scale={2} />Continue Last Quest</b><p className="mt-1 text-sm text-emerald-100">{activeChallenge.title} · pick up where you left off</p></button>
+              </div>
+              <div className="min-w-0 space-y-5">
+                <WorldMap regions={hubRegions} onOpenRegion={openCampaign} onOpenBoss={selectChallenge} />
+                <QuestBoard regionTitle={hubPack.title} quests={hubQuests} boss={hubBoss} onOpen={selectChallenge} />
+              </div>
             </div>
-            <button className="pixel-button terminal-card w-full rounded-3xl p-5 text-left shadow-xl" onClick={() => selectChallenge(activeChallenge.id)}><b>Continue Last Quest</b><p className="mt-1 text-sm text-emerald-100">{activeChallenge.title} · pick up where you left off</p></button>
           </section>
         ) : surface === "profile" ? (
           <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+            <div className="lg:col-span-2">
+                <div className="mt-4 grid gap-2 text-sm sm:grid-cols-4">
+                  <Metric label="Streak/rating" value={`${topicStats[0]?.streak ?? 0}/${topicStats[0]?.rating ?? 1000}`} />
+                  <Metric label="Bosses defeated" value={statBar.label} />
+                  <Metric label="Active quest" value={activeChallenge.title} />
+                  <Metric label="Boss" value={bossUnlocked ? "unlocked" : "locked"} />
+                  <Metric label="Reviews due" value={`${dueReviews.length}`} />
+                  <Metric label="XP" value={`${progress.rewards.xp}`} />
+                  <Metric label="Shards" value={`${progress.rewards.shards}`} />
+                </div>
+                <StatBar stat={statBar} />
+            </div>
             <div className="rounded-3xl border border-cyan-300/20 bg-slate-950/80 p-5"><h2 className="text-2xl font-black">Profile save file</h2><p className="mt-2 text-slate-300">{userName ?? "Guest"} · {progress.rewards.xp} XP · {progress.rewards.shards} Shards · {dueReviews.length} reviews due</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><Metric label="Bosses defeated" value={statBar.label} /><Metric label="Attempts logged" value={`${Object.values(progress.attempts).flat().length}`} /></div><div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3"><h3 className="font-bold">Recent attempts</h3><div className="mt-2 space-y-2 text-xs">{Object.values(progress.attempts).flat().slice(0, 4).length ? Object.values(progress.attempts).flat().slice(0, 4).map((attempt) => <p key={attempt.id} className="rounded-xl bg-slate-950/70 p-2">{attempt.challengeId} · {attempt.status} · {attempt.solutionAssisted ? "solution-assisted" : "unassisted"}</p>) : <p className="text-slate-400">No attempts logged yet.</p>}</div></div><div className="mt-4 rounded-2xl border border-purple-300/20 bg-purple-300/5 p-3"><h3 className="font-bold">Review reminders</h3><p className="mt-1 text-sm text-slate-300">{dueReviews.length ? `${dueReviews.length} rematch queued.` : "No reviews due. Beat a boss to start spaced rematches."}</p></div></div>
             <div className="space-y-4"><RewardPanel rewards={progress.rewards} onSpend={() => void progressAction("unlock_shop_preview")} /></div>
           </section>
@@ -975,6 +987,14 @@ function formatCaseArguments(testCase: ReplayCase) {
 }
 function formatTime(value: string) { try { return new Date(value).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }); } catch { return value; } }
 
+function toHubQuest(challenge: Challenge, progress: ProgressState, reviewDue: boolean): HubQuest {
+  const locked = !isUnlocked(challenge, progress);
+  const cleared = Boolean(progress.cleared[challenge.id]);
+  const state = reviewDue ? "review" : cleared ? "cleared" : locked ? "locked" : "available";
+  const required = challenge.unlock.requiresQuestIds.length;
+  const lockedReason = challenge.isBoss ? `Clear all ${required} quests to open the gate` : LOCKED_REASON;
+  return { id: challenge.id, title: challenge.title, brief: challenge.brief, xp: challenge.rewards?.xp ?? 0, shards: challenge.rewards?.shards ?? 0, isBoss: challenge.isBoss, state, lockedReason: locked ? lockedReason : undefined };
+}
 function isUnlocked(challenge: Challenge, progress: ProgressState) { return challenge.unlock.requiresQuestIds.every((id) => progress.cleared[id]); }
 function collectVars(events: TimelineEvent[], cursor: number) { const vars: Record<string, unknown> = {}; for (let i = 0; i <= cursor && i < events.length; i += 1) Object.assign(vars, events[i].vars ?? {}); return vars; }
 function lineNumbers(code: string) { return code.split("\n").map((_, index) => index + 1).join("\n"); }
