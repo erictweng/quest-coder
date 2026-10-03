@@ -157,6 +157,15 @@ const SAVE_DEBOUNCE_MS = 400;
 // Chromium rejects keepalive request bodies somewhere under 64 KiB; stay well below it.
 const KEEPALIVE_MAX_BYTES = 48_000;
 const LOCKED_REASON = "Clear the previous quest with Submit all first";
+const AUTH_ERROR_COPY: Record<string, string> = {
+  google_unavailable: "Google sign-in is not available on this server.",
+  google_failed: "Could not start Google sign-in. Try again shortly.",
+  callback_failed: "Sign-in did not complete. Try again.",
+  missing_code: "Sign-in did not complete. Try again.",
+  access_denied: "Google sign-in was cancelled.",
+  invalid_confirmation: "That sign-in link is invalid. Request a new one.",
+  confirmation_failed: "That sign-in link has expired or was already used. Request a new one."
+};
 const EMPTY_PROGRESS: ProgressState = { version: 0, cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, savedCodeVersions: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false, lastChallengeVersion: 0 };
 
 const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string }> = {
@@ -330,6 +339,16 @@ export default function Home() {
     })();
     return () => controller.abort();
   }, [applySave, beginRequest, endRequest, handleAuthResponse, requestIsCurrent]);
+
+  // /auth/callback and /auth/confirm report the outcome in the URL; show it once, then tidy the URL.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const reason = url.searchParams.get("auth_error") ?? (url.searchParams.get("error") === "access_denied" ? "access_denied" : null);
+    if (!reason && !url.searchParams.has("signed_in")) return;
+    if (reason) setSessionError(AUTH_ERROR_COPY[reason] ?? "Sign-in did not complete. Try again.");
+    for (const key of ["auth_error", "signed_in", "error", "error_code", "error_description"]) url.searchParams.delete(key);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   // Drafts, attempts, resume position and preferences are the only client-owned fields.
   const { attempts, savedCode, savedCodeVersions, friendsEnabled, lastChallengeId, lastChallengeVersion } = progress;
@@ -669,7 +688,7 @@ export default function Home() {
                 <StatusPill label={result?.execution.mode ? (resultMatchesCode ? `${result.execution.mode} · ${result.cases.length} cases` : "previous run") : "compiler ready"} tone={result?.passed && resultMatchesCode ? "green" : "cyan"} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={() => void signOut()}>Log out</button></> : <><input className="w-32 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Display name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} disabled={sessionLoading} /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950 disabled:opacity-60" disabled={sessionLoading} onClick={() => void signIn()}>Sign in</button></>}
+                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={() => void signOut()}>Log out</button></> : <SignInControls compact provider={authProvider} loading={sessionLoading} draft={userNameDraft} onDraft={setUserNameDraft} onSignIn={() => void signIn()} />}
               </div>
             </div>
           ) : (
@@ -683,7 +702,7 @@ export default function Home() {
                   {userName ? (
                     <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-300">Signed in as <b className="text-cyan-200">{userName}</b></span><button className="control" onClick={() => void signOut()}>Log out</button></div>
                   ) : (
-                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Display name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} disabled={sessionLoading} /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 disabled:opacity-60" disabled={sessionLoading} onClick={() => void signIn()}>Sign in</button></div>
+                    <div className="flex flex-wrap items-center gap-2"><SignInControls provider={authProvider} loading={sessionLoading} draft={userNameDraft} onDraft={setUserNameDraft} onSignIn={() => void signIn()} /></div>
                   )}
                 </div>
               </div>
@@ -768,7 +787,7 @@ export default function Home() {
                   <h3 className="font-bold">Console</h3>
                   <div className="flex flex-wrap items-center gap-2"><StatusPill label={result?.execution.mode ? (resultMatchesCode ? `${result.execution.mode} suite` : "previous run") : runError ? "runner message" : "waiting for run"} tone={result?.passed && resultMatchesCode ? "green" : runError ? "cyan" : "muted"} />{result?.execution.replayCaseId ? <StatusPill label={`animation ${result.execution.replayCaseId}`} tone="purple" /> : null}<button className="control px-3 py-1 text-xs" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Submissions"); }}>Submissions ({activeAttempts.length})</button></div>
                 </div>
-                {!userName ? <p className="mb-3 rounded-xl border border-yellow-300/40 bg-yellow-300/10 p-3 text-sm text-yellow-50" data-testid="signed-out-prompt"><b>Sign in to run code.</b> Enter {authProvider === "supabase" ? "your email" : "a display name"} in the top bar; your drafts and clears are saved to that account.</p> : isActiveLocked ? <p className="mb-3 rounded-xl border border-slate-500/40 bg-slate-500/10 p-3 text-sm text-slate-200">This quest is locked. {LOCKED_REASON}.</p> : null}
+                {!userName ? <p className="mb-3 rounded-xl border border-yellow-300/40 bg-yellow-300/10 p-3 text-sm text-yellow-50" data-testid="signed-out-prompt"><b>Sign in to run code.</b> {authProvider === "supabase" ? "Use Sign in with Google in the top bar" : "Enter a display name in the top bar"}; your drafts and clears are saved to that account.</p> : isActiveLocked ? <p className="mb-3 rounded-xl border border-slate-500/40 bg-slate-500/10 p-3 text-sm text-slate-200">This quest is locked. {LOCKED_REASON}.</p> : null}
                 {runError ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100" role="alert">{runError}</p> : null}
                 {result && !resultMatchesCode ? <p className="mb-3 rounded-xl border border-purple-300/30 bg-purple-300/10 p-3 text-sm text-purple-50" role="status"><b>Previous run.</b> The editor has changed; run the current code to refresh this result.</p> : null}
                 {result?.passed && result.execution.mode === "run" && resultMatchesCode ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-300/10 p-3 text-sm text-cyan-50" role="status"><b>Basic checks passed.</b> Submit all to clear this quest and unlock the next stage.</p> : null}
@@ -862,6 +881,25 @@ function SolutionGate({ solution, signedIn, xpShare, confirming, onAskConfirm, o
   if (!signedIn) return <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300"><h3 className="font-bold text-amber-100">Solution is hidden</h3><p className="mt-2">{SIGN_IN_FOR_HELP}</p></div>;
   if (confirming) return <div className="rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-50"><h3 className="font-bold">Reveal solution?</h3><p className="mt-2 leading-6">This will show the reference solution and mark future clears as solution-assisted, which earns {percent(xpShare)} of the quest XP. Use it only if you want to study the answer.</p><div className="mt-4 flex flex-wrap gap-2"><button className="control" onClick={onCancel}>Cancel</button><button className="rounded-xl bg-amber-300 px-4 py-2 font-bold text-slate-950" onClick={onReveal}>Reveal solution</button></div></div>;
   return <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300"><h3 className="font-bold text-amber-100">Solution is hidden</h3><p className="mt-2">Opening this tab does not reveal the answer. Confirm first if you want to view it.</p><button className="control mt-4" onClick={onAskConfirm}>I want to view the solution</button></div>;
+}
+
+/**
+ * Supabase mode signs in with Google only; local/test mode keeps the display-name form.
+ * Until /api/session reports the provider, show a disabled placeholder rather than the wrong form.
+ */
+function SignInControls({ provider, loading, draft, onDraft, onSignIn, compact = false }: { provider: "local" | "supabase" | null; loading: boolean; draft: string; onDraft: (value: string) => void; onSignIn: () => void; compact?: boolean }) {
+  const size = compact ? "rounded-lg px-3 py-1" : "rounded-xl px-4 py-2 text-sm";
+  if (provider === "supabase") {
+    return <a className={`${size} inline-flex items-center gap-2 border border-white/20 bg-white font-bold text-slate-900 hover:bg-slate-100`} href="/auth/google">
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z" /><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.4-4.7 7l7.6 5.9c4.4-4.1 6.8-10.1 6.8-17.4z" /><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z" /><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z" /></svg>
+      Sign in with Google
+    </a>;
+  }
+  if (provider === null && loading) return <button className={`${size} bg-cyan-300 font-bold text-slate-950 opacity-60`} disabled>Sign in</button>;
+  return <>
+    <input className={`${compact ? "w-32 rounded-lg px-2 py-1" : "rounded-xl px-3 py-2 text-sm"} border border-white/10 bg-slate-950`} value={draft} placeholder="Display name" onChange={(event) => onDraft(event.target.value)} aria-label="User name" disabled={loading} />
+    <button className={`${size} bg-cyan-300 font-bold text-slate-950 disabled:opacity-60`} disabled={loading} onClick={onSignIn}>Sign in</button>
+  </>;
 }
 
 function StatusPill({ label, tone }: { label: string; tone: "cyan" | "gold" | "green" | "purple" | "pink" | "muted" }) {

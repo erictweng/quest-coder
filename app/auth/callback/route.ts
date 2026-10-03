@@ -6,7 +6,8 @@ export async function GET(request: Request) {
   const code = url.searchParams.get("code");
   const destination = new URL("/", url.origin);
   if (!code) {
-    destination.searchParams.set("auth_error", "missing_code");
+    // Providers such as Google return ?error=access_denied when the player cancels.
+    destination.searchParams.set("auth_error", url.searchParams.get("error") === "access_denied" ? "access_denied" : "missing_code");
     return NextResponse.redirect(destination);
   }
 
