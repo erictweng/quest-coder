@@ -1,6 +1,6 @@
 # Medieval Pixel MMO Redesign — Implementation Plan
 
-> Each milestone is its own PR with desktop and mobile screenshots, and stops for review before the next one starts. Status: **M0 (style tile) in review.**
+> Each milestone is its own PR with desktop and mobile screenshots, and stops for review before the next one starts. Status: **M0 (style tile) approved. "Apply the design" pass done** (see §6).
 
 **Goal:** Reskin Quest Coder as a medieval, pixel-art MMO RPG (town hub, world map, quest board, character sheet, action-bar HUD, loot and level-up moments) without making reading problems or writing code harder.
 
@@ -124,3 +124,16 @@ Each milestone: a branch and PR, lint + unit + build + `test:e2e` + `test:e2e:ac
 2. **Look:** dark stone and oak frames, parchment for reading.
 3. **Font:** one pixel font everywhere: **Pixelify Sans** (OFL, self-hosted via `next/font`). Code stays monospace. The style tile shows a problem paragraph in both Pixelify Sans and a plain font so the problem-text choice can be confirmed.
 4. **M0 first:** the style tile at `/styleguide` (local dev and Vercel previews only; 404 on production).
+
+## 6. Applied (step 2: "apply this design")
+
+Eric approved the style tile and asked to apply it app-wide. Done in one pass:
+
+- **Foundation (M1):** Pixelify Sans and the palette variables load in `app/layout.tsx` from `components/medieval/tokens.ts`. `app/globals.css` remaps Tailwind's stock palettes to the medieval palette (cyan → gold, slate → stone/parchment neutrals, rose → ruby, purple → amethyst, …), squares all corners, raises the small text sizes for the pixel font, and restyles the shared classes (`pixel-panel` stone, `terminal-card` oak, `neon-maze-panel` raised stone, `firewall-gate` boss gate, `control` bevel buttons) with hard bevels and no glows. The medieval stylesheet moved to `app/medieval.css`.
+- **Copy and art (parts of M3–M5):** all Cyberpunk Bit copy replaced (hub, guide, cards, regions, boss gate, combat log, completion moment). Neon SVGs replaced with code-drawn sprites; `public/art/cyberpunk-bit` and `public/art/sky-island` deleted. Run is now a stone secondary button and Submit the gold primary, as on the tile. Button and tab names are unchanged.
+
+**Still to do:**
+- M2: split `app/page.tsx`.
+- Rename the remapped utilities to semantic names (`cyan` currently means gold).
+- Problem text on parchment instead of oak.
+- Structural pieces not yet in the app: illustrated world map, pinned quest-board notices, HUD XP bar on the solve screen, loot toast and level-up banner, castle-staircase replay.

@@ -1,31 +1,134 @@
 @import "tailwindcss";
+@import "./medieval.css";
 
+/*
+ * Medieval pixel MMO theme (docs/MEDIEVAL_REDESIGN.md).
+ *
+ * The page was built with Tailwind's stock palettes. Instead of rewriting ~130 class names in one
+ * go, those palettes are remapped here to the medieval palette so every surface changes together:
+ *   slate → warm stone/parchment neutrals   cyan → gold (primary accent)   yellow → bright gold
+ *   amber/orange → ember   emerald/green → emerald   rose/red/pink → ruby
+ *   purple/violet/fuchsia → amethyst   sky/blue → sapphire
+ * Key shades match components/medieval/tokens.ts. Later redesign steps replace these utilities
+ * with semantic names; until then, read "cyan" as "gold".
+ */
+@theme {
+  --font-sans: var(--mq-font), system-ui, sans-serif;
+
+  --color-slate-50: #FBF6EA;
+  --color-slate-100: #F7EFDD;
+  --color-slate-200: #EDE3CC;
+  --color-slate-300: #DDD1B6;
+  --color-slate-400: #C9BC9E;
+  --color-slate-500: #A89C83;
+  --color-slate-600: #6E6656;
+  --color-slate-700: #4A4552;
+  --color-slate-800: #33303C;
+  --color-slate-900: #2A2832;
+  --color-slate-950: #1C1A22;
+
+  --color-cyan-50: #FFF8E1;
+  --color-cyan-100: #FDEFC4;
+  --color-cyan-200: #F8DF92;
+  --color-cyan-300: #F2C14E;
+  --color-cyan-400: #E0A93A;
+  --color-cyan-500: #C48A22;
+  --color-cyan-600: #9A6B12;
+  --color-cyan-700: #7A5410;
+  --color-cyan-800: #5A3E0E;
+  --color-cyan-900: #3D2A0A;
+  --color-cyan-950: #24190A;
+
+  --color-yellow-50: #FFFAEA;
+  --color-yellow-100: #FFF1C9;
+  --color-yellow-200: #FBE39A;
+  --color-yellow-300: #F7D16A;
+  --color-yellow-400: #EDBD45;
+  --color-yellow-500: #C9962A;
+  --color-yellow-950: #2A1D06;
+
+  --color-amber-50: #FFF4E8;
+  --color-amber-100: #FDE3C8;
+  --color-amber-200: #F9C99A;
+  --color-amber-300: #F5A05A;
+  --color-amber-400: #E8863A;
+  --color-orange-200: #F9C99A;
+  --color-orange-300: #F5A05A;
+
+  --color-emerald-50: #ECFBF0;
+  --color-emerald-100: #CDF5D8;
+  --color-emerald-200: #A3EBB7;
+  --color-emerald-300: #5FD383;
+  --color-emerald-400: #3FBF6A;
+  --color-emerald-500: #2E9E55;
+  --color-emerald-950: #0B2615;
+  --color-green-300: #5FD383;
+
+  --color-rose-50: #FFF0F0;
+  --color-rose-100: #FFD6D8;
+  --color-rose-200: #FFB3B6;
+  --color-rose-300: #FF7A7F;
+  --color-rose-400: #F05058;
+  --color-rose-500: #D63842;
+  --color-red-300: #FF7A7F;
+  --color-pink-100: #FFD6D8;
+  --color-pink-200: #FFB3B6;
+  --color-pink-300: #FF7A7F;
+
+  --color-purple-50: #F7F0FF;
+  --color-purple-100: #EADBFF;
+  --color-purple-200: #D9C0FA;
+  --color-purple-300: #C29BF0;
+  --color-purple-950: #1E1030;
+  --color-violet-200: #D9C0FA;
+  --color-violet-300: #C29BF0;
+  --color-fuchsia-200: #D9C0FA;
+
+  --color-sky-200: #BBD6F7;
+  --color-sky-300: #7FB2F0;
+
+  /* Pixel look: square corners everywhere except true circles. */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+
+  /* The pixel font needs a slightly larger floor than a vector font to stay readable. */
+  --text-xs: 0.875rem;
+  --text-xs--line-height: 1.35;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.45;
+}
+
+/* Legacy --qc-* names now point at medieval colours, so any remaining references stay on-theme. */
 :root {
   color-scheme: dark;
-  --qc-void: #070814;
-  --qc-night: #0D1024;
-  --qc-panel: #141833;
-  --qc-panel-2: #1B2142;
-  --qc-border: #E8E2C8;
-  --qc-border-muted: #3A416A;
-  --qc-text: #FFF7D6;
-  --qc-text-muted: #B8B6D9;
-  --qc-cyan: #5DEBFF;
-  --qc-teal: #36D399;
-  --qc-gold: #FFD166;
-  --qc-pink: #FF6FAE;
-  --qc-red: #FF4D6D;
-  --qc-green: #7CFF6B;
-  --qc-purple: #A78BFA;
-  --qc-grid: #0B1020;
-  --qc-maze-blue: #2F7DFF;
-  --qc-neon-cyan: #00F5FF;
-  --qc-pac-yellow: #FFE14A;
-  --qc-ghost-pink: #FF4FD8;
-  --qc-ghost-red: #FF4D6D;
-  --qc-power-blue: #5DEBFF;
-  --qc-terminal-green: #36D399;
-  --qc-warning-orange: #FF9F1C;
+  --qc-void: #0F0E13;
+  --qc-night: #1C1A22;
+  --qc-panel: #24222B;
+  --qc-panel-2: #33303C;
+  --qc-border: #A8865A;
+  --qc-border-muted: #4A4552;
+  --qc-text: #F7EFDD;
+  --qc-text-muted: #CFC4AC;
+  --qc-cyan: #F2C14E;
+  --qc-teal: #5FD383;
+  --qc-gold: #F2C14E;
+  --qc-pink: #FF7A7F;
+  --qc-red: #FF7A7F;
+  --qc-green: #5FD383;
+  --qc-purple: #C29BF0;
+  --qc-grid: #1C1A22;
+  --qc-maze-blue: #5A3A22;
+  --qc-neon-cyan: #F2C14E;
+  --qc-pac-yellow: #F2C14E;
+  --qc-ghost-pink: #FF7A7F;
+  --qc-ghost-red: #FF7A7F;
+  --qc-power-blue: #7FB2F0;
+  --qc-terminal-green: #5FD383;
+  --qc-warning-orange: #F5A05A;
 }
 
 * {
@@ -34,17 +137,19 @@
 
 body {
   margin: 0;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--mq-font), system-ui, sans-serif;
   background: var(--qc-void);
   color: var(--qc-text);
 }
 
 code,
 pre,
-textarea {
+textarea,
+kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
+  -webkit-font-smoothing: auto;
 }
 
 button,
@@ -60,161 +165,126 @@ a:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
-[role="tab"]:focus-visible {
-  outline: 3px solid var(--qc-pac-yellow);
+[role="tab"]:focus-visible,
+[role="tabpanel"]:focus-visible {
+  outline: 3px solid var(--qc-gold);
   outline-offset: 3px;
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--qc-neon-cyan) 28%, transparent);
+  box-shadow: 0 0 0 6px #0F0E13;
 }
 
-.control {
-  border-radius: 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--qc-border) 18%, transparent);
-  padding: 0.5rem 0.75rem;
-  background: color-mix(in srgb, var(--qc-panel) 78%, transparent);
-  color: var(--qc-text);
-}
-
-.control:hover {
-  background: color-mix(in srgb, var(--qc-neon-cyan) 12%, var(--qc-panel));
-}
-
-.pixel-console {
-  background:
-    linear-gradient(color-mix(in srgb, var(--qc-cyan) 4%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--qc-purple) 4%, transparent) 1px, transparent 1px),
-    radial-gradient(circle at top, color-mix(in srgb, var(--qc-maze-blue) 28%, transparent) 0, var(--qc-void) 48%, #01030a 100%);
-  background-size: 18px 18px, 18px 18px, auto;
-}
-
-.cyber-bit-world {
-  background:
-    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--qc-ghost-pink) 18%, transparent) 0 4rem, transparent 4.35rem),
-    radial-gradient(circle at 78% 16%, color-mix(in srgb, var(--qc-pac-yellow) 16%, transparent) 0 3.5rem, transparent 3.85rem),
-    linear-gradient(180deg, color-mix(in srgb, var(--qc-grid) 92%, #000), var(--qc-void) 72%);
-}
-
-.maze-grid-field {
-  position: relative;
-  overflow: hidden;
-}
-
-.maze-grid-field::before,
-.maze-grid-field::after {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-}
-
-.maze-grid-field::before {
-  background:
-    linear-gradient(color-mix(in srgb, var(--qc-maze-blue) 16%, transparent) 2px, transparent 2px),
-    linear-gradient(90deg, color-mix(in srgb, var(--qc-maze-blue) 16%, transparent) 2px, transparent 2px);
-  background-size: 4.5rem 4.5rem;
-  mask-image: linear-gradient(180deg, black, transparent 75%);
-}
-
-.maze-grid-field::after {
-  background:
-    radial-gradient(circle at 20% 30%, color-mix(in srgb, var(--qc-pac-yellow) 36%, transparent) 0 0.22rem, transparent 0.26rem),
-    radial-gradient(circle at 55% 18%, color-mix(in srgb, var(--qc-power-blue) 32%, transparent) 0 0.28rem, transparent 0.32rem),
-    radial-gradient(circle at 82% 42%, color-mix(in srgb, var(--qc-ghost-pink) 32%, transparent) 0 0.24rem, transparent 0.28rem);
-  opacity: 0.62;
-}
-
-.neon-maze-panel {
-  border: 2px solid color-mix(in srgb, var(--qc-maze-blue) 64%, var(--qc-border-muted));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--qc-neon-cyan) 8%, transparent), transparent 34%),
-    linear-gradient(180deg, color-mix(in srgb, var(--qc-panel-2) 96%, transparent), color-mix(in srgb, var(--qc-grid) 74%, var(--qc-night)));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--qc-neon-cyan) 22%, transparent), 0 0 34px color-mix(in srgb, var(--qc-maze-blue) 18%, transparent), 0 20px 48px rgb(0 0 0 / 0.35);
-}
-
-.terminal-card {
-  border: 2px solid color-mix(in srgb, var(--qc-pac-yellow) 54%, var(--qc-maze-blue));
-  background: linear-gradient(180deg, color-mix(in srgb, var(--qc-panel) 90%, var(--qc-grid)), color-mix(in srgb, var(--qc-grid) 84%, var(--qc-void)));
-  box-shadow: 4px 4px 0 color-mix(in srgb, var(--qc-maze-blue) 45%, transparent), 0 0 26px color-mix(in srgb, var(--qc-neon-cyan) 12%, transparent);
-}
-
+/* Shared bevel recipe: hard edge, light top-left, dark bottom-right, no blur. */
+.control,
+.pixel-button,
+.pixel-panel,
+.neon-maze-panel,
+.terminal-card,
+.pixel-dialogue,
 .firewall-gate {
-  border-color: color-mix(in srgb, var(--qc-ghost-pink) 65%, var(--qc-border)) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--qc-panel-2) 68%, var(--qc-ghost-pink)), color-mix(in srgb, var(--qc-ghost-red) 18%, var(--qc-void))) !important;
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--qc-power-blue) 16%, transparent), 0 0 30px color-mix(in srgb, var(--qc-ghost-pink) 22%, transparent);
+  --bevel-hi: #5A5666;
+  --bevel-lo: #17151C;
+  border-style: solid;
+  box-shadow: inset 3px 3px 0 var(--bevel-hi), inset -3px -3px 0 var(--bevel-lo);
 }
 
-.pellet-node {
-  border-radius: 999px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--qc-pac-yellow) 30%, transparent), 0 0 14px color-mix(in srgb, var(--qc-pac-yellow) 16%, transparent);
+/* Secondary buttons. */
+.control {
+  border-width: 3px;
+  border-color: #0F0E13;
+  padding: 0.5rem 0.75rem;
+  background: #33303C;
+  color: var(--qc-text);
 }
+.control:hover { background: #3C3946; }
+.control:active { transform: translate(2px, 2px); box-shadow: none; }
 
-.power-node {
-  border-radius: 999px;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--qc-power-blue) 42%, transparent), 0 0 18px color-mix(in srgb, var(--qc-power-blue) 28%, transparent);
+/* The app shell: a dark castle wall of stone blocks. */
+.pixel-console,
+.cyber-bit-world {
+  background-color: #0F0E13;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 2px, transparent 2px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.3) 2px, transparent 2px);
+  background-size: 48px 24px, 48px 48px;
 }
+.maze-grid-field { position: relative; }
 
-.cyber-asset {
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  flex: none;
-  filter: drop-shadow(0 6px 0 rgb(7 8 20 / 0.45));
-}
-
-.cyber-asset-soft {
-  opacity: 0.82;
-  filter: drop-shadow(0 4px 0 rgb(7 8 20 / 0.22));
-}
-
+/* Stone panels: menus, headers, editor frame. */
 .pixel-panel {
-  border: 2px solid color-mix(in srgb, var(--qc-border) 24%, transparent);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--qc-panel) 92%, transparent), color-mix(in srgb, var(--qc-night) 96%, transparent));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--qc-neon-cyan) 12%, transparent), 0 18px 44px rgb(0 0 0 / 0.35);
+  border-width: 4px;
+  border-color: #0F0E13;
+  background: #24222B;
 }
 
+/* Oak panels: hub cards, quest cards, problem cards. */
+.terminal-card {
+  --bevel-hi: #8A5E37;
+  --bevel-lo: #3A2414;
+  border-width: 4px;
+  border-color: #2A1A0E;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 14px, rgba(0, 0, 0, 0.16) 14px 16px),
+    #5A3A22;
+}
+
+/* Raised stone: campaign regions, quest path. */
+.neon-maze-panel {
+  border-width: 4px;
+  border-color: #0F0E13;
+  background: #2E2B36;
+}
+
+/* Guide dialogue box. */
 .pixel-dialogue {
-  border: 2px solid color-mix(in srgb, var(--qc-border) 34%, transparent);
-  background: color-mix(in srgb, var(--qc-panel-2) 90%, transparent);
+  border-width: 4px;
+  border-color: #9A6B12;
+  background: #24222B;
   color: var(--qc-text);
 }
 
-.pixel-button {
-  border: 2px solid color-mix(in srgb, var(--qc-border) 24%, transparent);
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--qc-purple) 32%, transparent);
-  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+/* Boss gate: stone with a ruby edge. */
+.firewall-gate {
+  --bevel-hi: #6A3A40;
+  --bevel-lo: #1A0C0F;
+  border-width: 4px !important;
+  border-color: #7A1E25 !important;
+  background: #2A1F27 !important;
 }
 
-.pixel-button:hover {
-  transform: translate(-1px, -1px);
-  box-shadow: 4px 4px 0 color-mix(in srgb, var(--qc-neon-cyan) 32%, transparent);
+/* Pixel buttons press 2px down-right. */
+.pixel-button { transition: none; }
+.pixel-button:hover { filter: brightness(1.08); }
+.pixel-button:active { transform: translate(2px, 2px); box-shadow: none; }
+
+/* Small markers (quest path pips, icon wells): square, not neon circles. */
+.pellet-node,
+.power-node {
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.12), inset -2px -2px 0 rgba(0, 0, 0, 0.35);
 }
 
-.pixel-button:active {
-  transform: translate(2px, 2px);
-  box-shadow: 1px 1px 0 color-mix(in srgb, var(--qc-cyan) 28%, transparent);
-}
-
+.cyber-asset,
 .bit-sprite {
   image-rendering: pixelated;
-  border-radius: 0.45rem;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--qc-border) 24%, transparent), inset 0 -8px 0 rgb(0 0 0 / 0.18);
+  flex: none;
 }
 
 .status-label::before {
   content: "◆ ";
 }
 
+/* Reward sparks: stepped pixel bursts in gold, emerald and amethyst. */
 .firework {
   position: absolute;
-  color: var(--qc-pac-yellow);
+  color: var(--qc-gold);
   font-size: 1.35rem;
   opacity: 0;
-  animation: gentle-firework 1100ms ease-out forwards;
-  text-shadow: 0 0 12px color-mix(in srgb, var(--qc-pac-yellow) 60%, transparent);
+  animation: gentle-firework 1100ms steps(6) forwards;
+  text-shadow: 2px 2px 0 #000;
 }
 
 .firework-a { left: 10%; top: 58%; animation-delay: 0ms; }
-.firework-b { left: 34%; top: 22%; animation-delay: 110ms; color: var(--qc-neon-cyan); }
-.firework-c { right: 22%; top: 34%; animation-delay: 210ms; color: var(--qc-ghost-pink); }
+.firework-b { left: 34%; top: 22%; animation-delay: 110ms; color: #5FD383; }
+.firework-c { right: 22%; top: 34%; animation-delay: 210ms; color: #C29BF0; }
 .firework-d { right: 9%; top: 64%; animation-delay: 320ms; }
 
 @keyframes gentle-firework {
@@ -224,7 +294,9 @@ summary:focus-visible,
 }
 
 .completion-moment {
-  box-shadow: 0 0 28px color-mix(in srgb, var(--qc-terminal-green) 18%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--qc-terminal-green) 22%, transparent);
+  border-width: 4px !important;
+  border-color: #9A6B12 !important;
+  box-shadow: 6px 6px 0 #0F0E13, inset 3px 3px 0 #5A5666;
 }
 
 @media (prefers-reduced-motion: reduce) {
