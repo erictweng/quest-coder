@@ -13,9 +13,15 @@ export class RunnerBoundaryError extends Error {
   }
 }
 
+/** Trimmed so a pasted trailing newline or space in the Vercel value does not break auth. */
+function runnerConfig() {
+  const baseUrl = process.env.QUEST_CODER_RUNNER_URL?.trim().replace(/\/$/, "");
+  const token = process.env.QUEST_CODER_RUNNER_TOKEN?.trim();
+  return { baseUrl, token };
+}
+
 export async function submitToRunner(payload: RunRequest): Promise<Record<string, unknown>> {
-  const baseUrl = process.env.QUEST_CODER_RUNNER_URL?.replace(/\/$/, "");
-  const token = process.env.QUEST_CODER_RUNNER_TOKEN;
+  const { baseUrl, token } = runnerConfig();
   if (!baseUrl || !token) throw new RunnerBoundaryError("The execution service is not configured. Start the runner service, then try again.", 503, "runner_unavailable");
 
   const controller = new AbortController();
@@ -31,6 +37,12 @@ export async function submitToRunner(payload: RunRequest): Promise<Record<string
     const text = await readCappedResponse(response);
     const parsed = safeJson(text);
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        // The app's runner credential was rejected. This is a server misconfiguration, never the
+        // player's session: a 401 here would make the browser sign the player out.
+        console.error(JSON.stringify({ event: "runner_auth_rejected", status: response.status }));
+        throw new RunnerBoundaryError("The execution service is misconfigured. Try again later.", 503, "runner_misconfigured");
+      }
       const message = typeof parsed.error === "string" ? parsed.error : `execution service returned ${response.status}`;
       const code = typeof parsed.code === "string" ? parsed.code : "runner_error";
       throw new RunnerBoundaryError(message, normalizeStatus(response.status), code);
@@ -47,8 +59,7 @@ export async function submitToRunner(payload: RunRequest): Promise<Record<string
 }
 
 export async function runnerHealth(): Promise<{ available: boolean; mode: string; version?: string }> {
-  const baseUrl = process.env.QUEST_CODER_RUNNER_URL?.replace(/\/$/, "");
-  const token = process.env.QUEST_CODER_RUNNER_TOKEN;
+  const { baseUrl, token } = runnerConfig();
   if (!baseUrl || !token) return { available: false, mode: "external-service" };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1500);
@@ -87,4 +98,5 @@ export async function readCappedResponse(response: Response, maxBytes = MAX_RESP
   }
 }
 function safeJson(text: string): Record<string, unknown> { try { return JSON.parse(text) as Record<string, unknown>; } catch { return {}; } }
-function normalizeStatus(status: number) { return [400, 401, 403, 404, 409, 422, 429, 503, 504].includes(status) ? status : 502; }
+// 401/403 are deliberately absent: those belong to the player's own session.
+function normalizeStatus(status: number) { return [400, 404, 409, 422, 429, 503, 504].includes(status) ? status : 502; }
