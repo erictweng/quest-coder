@@ -157,6 +157,15 @@ const SAVE_DEBOUNCE_MS = 400;
 // Chromium rejects keepalive request bodies somewhere under 64 KiB; stay well below it.
 const KEEPALIVE_MAX_BYTES = 48_000;
 const LOCKED_REASON = "Clear the previous quest with Submit all first";
+const AUTH_ERROR_COPY: Record<string, string> = {
+  google_unavailable: "Google sign-in is not available on this server.",
+  google_failed: "Could not start Google sign-in. Try again shortly.",
+  callback_failed: "Sign-in did not complete. Try again.",
+  missing_code: "Sign-in did not complete. Try again.",
+  access_denied: "Google sign-in was cancelled.",
+  invalid_confirmation: "That sign-in link is invalid. Request a new one.",
+  confirmation_failed: "That sign-in link has expired or was already used. Request a new one."
+};
 const EMPTY_PROGRESS: ProgressState = { version: 0, cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, savedCodeVersions: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false, lastChallengeVersion: 0 };
 
 const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string }> = {
@@ -330,6 +339,16 @@ export default function Home() {
     })();
     return () => controller.abort();
   }, [applySave, beginRequest, endRequest, handleAuthResponse, requestIsCurrent]);
+
+  // /auth/callback and /auth/confirm report the outcome in the URL; show it once, then tidy the URL.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const reason = url.searchParams.get("auth_error") ?? (url.searchParams.get("error") === "access_denied" ? "access_denied" : null);
+    if (!reason && !url.searchParams.has("signed_in")) return;
+    if (reason) setSessionError(AUTH_ERROR_COPY[reason] ?? "Sign-in did not complete. Try again.");
+    for (const key of ["auth_error", "signed_in", "error", "error_code", "error_description"]) url.searchParams.delete(key);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   // Drafts, attempts, resume position and preferences are the only client-owned fields.
   const { attempts, savedCode, savedCodeVersions, friendsEnabled, lastChallengeId, lastChallengeVersion } = progress;
@@ -669,7 +688,7 @@ export default function Home() {
                 <StatusPill label={result?.execution.mode ? (resultMatchesCode ? `${result.execution.mode} · ${result.cases.length} cases` : "previous run") : "compiler ready"} tone={result?.passed && resultMatchesCode ? "green" : "cyan"} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={() => void signOut()}>Log out</button></> : <><input className="w-32 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Display name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} disabled={sessionLoading} /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950 disabled:opacity-60" disabled={sessionLoading} onClick={() => void signIn()}>Sign in</button></>}
+                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={() => void signOut()}>Log out</button></> : <><input className="w-32 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Display name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} disabled={sessionLoading} /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950 disabled:opacity-60" disabled={sessionLoading} onClick={() => void signIn()}>Sign in</button>{authProvider === "supabase" ? <a className="rounded-lg border border-white/20 bg-white px-3 py-1 font-bold text-slate-900" href="/auth/google">Continue with Google</a> : null}</>}
               </div>
             </div>
           ) : (
@@ -683,7 +702,7 @@ export default function Home() {
                   {userName ? (
                     <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-300">Signed in as <b className="text-cyan-200">{userName}</b></span><button className="control" onClick={() => void signOut()}>Log out</button></div>
                   ) : (
-                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Display name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} disabled={sessionLoading} /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 disabled:opacity-60" disabled={sessionLoading} onClick={() => void signIn()}>Sign in</button></div>
+                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Display name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} disabled={sessionLoading} /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 disabled:opacity-60" disabled={sessionLoading} onClick={() => void signIn()}>Sign in</button>{authProvider === "supabase" ? <a className="rounded-xl border border-white/20 bg-white px-4 py-2 text-sm font-bold text-slate-900" href="/auth/google">Continue with Google</a> : null}</div>
                   )}
                 </div>
               </div>

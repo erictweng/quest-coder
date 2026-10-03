@@ -415,6 +415,22 @@ test("runner boundary fails closed and hides submit fixtures", async ({ request 
   expect((await (await request.get("/api/progress")).json()).progress.rewards.xp).toBe(13);
 });
 
+test("Google sign-in is hidden and fails closed without Supabase, and auth errors are shown once", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("session-loading")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Continue with Google" })).toHaveCount(0);
+
+  await page.goto("/auth/google");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByText("Google sign-in is not available on this server.")).toBeVisible();
+
+  await page.goto("/auth/callback?error=access_denied&error_description=cancelled");
+  await expect(page.getByText("Google sign-in was cancelled.")).toBeVisible();
+  expect(new URL(page.url()).search).toBe("");
+  await page.reload();
+  await expect(page.getByText("Google sign-in was cancelled.")).toHaveCount(0);
+});
+
 test("app JSON endpoints reject oversized bodies", async ({ request }) => {
   const session = await request.post("/api/session", { data: { displayName: "Size Boundary" } });
   expect(session.ok()).toBeTruthy();
