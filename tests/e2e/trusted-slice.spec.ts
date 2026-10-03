@@ -418,7 +418,7 @@ test("runner boundary fails closed and hides submit fixtures", async ({ request 
 test("Google sign-in is hidden and fails closed without Supabase, and auth errors are shown once", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("session-loading")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Continue with Google" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Sign in with Google" })).toHaveCount(0);
 
   await page.goto("/auth/google");
   await expect(page).toHaveURL(/\/$/);
@@ -429,6 +429,23 @@ test("Google sign-in is hidden and fails closed without Supabase, and auth error
   expect(new URL(page.url()).search).toBe("");
   await page.reload();
   await expect(page.getByText("Google sign-in was cancelled.")).toHaveCount(0);
+});
+
+test("Supabase mode offers only Sign in with Google, with no email form", async ({ page }) => {
+  await page.route("**/api/session", (route) => route.request().method() === "GET"
+    ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: false, provider: "supabase" }) })
+    : route.continue());
+  await page.goto("/");
+  await expect(page.getByTestId("session-loading")).toHaveCount(0);
+  const google = page.getByRole("link", { name: "Sign in with Google" });
+  await expect(google).toHaveCount(1);
+  await expect(google).toHaveAttribute("href", "/auth/google");
+  await expect(page.getByRole("textbox")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Solve", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Sign in with Google" })).toHaveCount(1);
+  await expect(page.getByTestId("signed-out-prompt")).toContainText("Sign in with Google");
 });
 
 test("app JSON endpoints reject oversized bodies", async ({ request }) => {
