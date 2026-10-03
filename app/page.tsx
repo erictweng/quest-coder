@@ -5,6 +5,7 @@ import { CompletionMoment } from "../components/completion-moment";
 import { ResultSummary } from "../components/result-summary";
 import climbingStairsPack from "../content/public/forest-of-patience-climbing-stairs.json";
 import { appendAttempt, attemptFromFailure, attemptFromResult, describeAttempt, type AttemptRecord } from "../lib/attempts";
+import { mergeRevisionRecord, mergeServerSnapshot, shouldApplyServerSnapshot, validLastChallengeId } from "../lib/client-progress";
 import { backspaceEdit, colonEdit, enterEdit, shiftTabEdit, tabEdit, type EditorEdit } from "../lib/python-editing";
 
 type Status =
@@ -61,7 +62,7 @@ type RunResult = {
   security?: { profile: string; grading: string; fallback: string };
 };
 /** State only the server can change. Run and action responses return it so the client never computes it. */
-type ServerOwned = Pick<ProgressState, "cleared" | "solutionOpened" | "hintsOpened" | "reviews" | "rewards">;
+type ServerOwned = Pick<ProgressState, "version" | "cleared" | "solutionOpened" | "hintsOpened" | "reviews" | "rewards">;
 type RunResponse = RunResult & { reward: RewardGrant | null; progress: ServerOwned };
 /** Hint text and solutions the server has released for this player, keyed by challenge id. */
 type Revealed = { hints: Record<string, string[]>; solutions: Record<string, string> };
@@ -130,6 +131,8 @@ type ProgressState = {
   reviews: Record<string, ReviewRecord>;
   rewards: RewardWallet;
   friendsEnabled: boolean;
+  lastChallengeId?: string;
+  lastChallengeVersion: number;
 };
 
 const PACKS = [climbingStairsPack] as Pack[];
@@ -144,6 +147,7 @@ const CHALLENGES: Challenge[] = PACKS.flatMap((pack) => [...pack.quests, pack.bo
   isBoss: challenge.id === pack.boss.id
 })));
 const CHALLENGE_BY_ID = Object.fromEntries(CHALLENGES.map((challenge) => [challenge.id, challenge]));
+const CHALLENGE_IDS = new Set(CHALLENGES.map((challenge) => challenge.id));
 const PLAY_SPEEDS = [0.5, 1, 2, 4];
 const EMPTY_REWARDS: RewardWallet = { xp: 0, shards: 0, grants: [], shopPreviewUnlocked: false };
 const EMPTY_REVEALED: Revealed = { hints: {}, solutions: {} };
@@ -153,7 +157,7 @@ const SAVE_DEBOUNCE_MS = 400;
 // Chromium rejects keepalive request bodies somewhere under 64 KiB; stay well below it.
 const KEEPALIVE_MAX_BYTES = 48_000;
 const LOCKED_REASON = "Clear the previous quest with Submit all first";
-const EMPTY_PROGRESS: ProgressState = { version: 0, cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, savedCodeVersions: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false };
+const EMPTY_PROGRESS: ProgressState = { version: 0, cleared: {}, solutionOpened: {}, hintsOpened: {}, attempts: {}, savedCode: {}, savedCodeVersions: {}, reviews: {}, rewards: EMPTY_REWARDS, friendsEnabled: false, lastChallengeVersion: 0 };
 
 const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string }> = {
   passed: { title: "passed:", visual: "gold relic glow", tone: "text-emerald-200 bg-emerald-500/15 border-emerald-300/40" },
@@ -169,9 +173,20 @@ const OUTCOME_COPY: Record<Status, { title: string; visual: string; tone: string
 export default function Home() {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const gutterRef = useRef<HTMLPreElement | null>(null);
+  const notebookRef = useRef<HTMLElement | null>(null);
+  const notebookToggleRef = useRef<HTMLButtonElement | null>(null);
+  const notebookReturnFocusRef = useRef<HTMLElement | null>(null);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const requestControllersRef = useRef(new Set<AbortController>());
+  const sessionGenerationRef = useRef(0);
+  const editorGenerationRef = useRef(0);
+  const serverVersionRef = useRef(0);
+  // A ref, not state: the keyboard shortcut can fire twice before a re-render.
+  const runInFlightRef = useRef(false);
   const [userNameDraft, setUserNameDraft] = useState("");
   const [userName, setUserName] = useState<string | null>(null);
   const [authProvider, setAuthProvider] = useState<"local" | "supabase" | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState>(EMPTY_PROGRESS);
   const [revealed, setRevealed] = useState<Revealed>(EMPTY_REVEALED);
@@ -195,6 +210,7 @@ export default function Home() {
   const [speed, setSpeed] = useState(1);
   const [recentReward, setRecentReward] = useState<RewardGrant | null>(null);
   const [passMoment, setPassMoment] = useState(false);
+  const [completionAssistance, setCompletionAssistance] = useState<"solution" | "hint" | null>(null);
 
   const replay = result?.replay ?? null;
   const events = replay?.events ?? [];
@@ -218,78 +234,141 @@ export default function Home() {
     if (index < 0) return null;
     return activePath[index + 1] ? CHALLENGE_BY_ID[activePath[index + 1].id] : null;
   }, [activePath, activeChallenge.id]);
+  const resultMatchesCode = result !== null && ranSource === code;
 
   const activeChallengeRef = useRef(activeChallenge);
   activeChallengeRef.current = activeChallenge;
 
-  /** Adopts the server's save file, including the draft for the open challenge. */
-  const applySave = useCallback((displayName: string, saved: unknown, released: Revealed | undefined) => {
+  const unsavedRef = useRef<string | null>(null);
+  const abortRequests = useCallback(() => {
+    sessionGenerationRef.current += 1;
+    for (const controller of requestControllersRef.current) controller.abort();
+    requestControllersRef.current.clear();
+  }, []);
+  const beginRequest = useCallback(() => {
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    return { controller, generation: sessionGenerationRef.current };
+  }, []);
+  const requestIsCurrent = useCallback((generation: number) => generation === sessionGenerationRef.current, []);
+  const endRequest = useCallback((controller: AbortController) => requestControllersRef.current.delete(controller), []);
+
+  const clearSignedInState = useCallback((message?: string) => {
+    abortRequests();
+    unsavedRef.current = null;
+    runInFlightRef.current = false;
+    serverVersionRef.current = 0;
+    setUserName(null);
+    setProgress(EMPTY_PROGRESS);
+    setRevealed(EMPTY_REVEALED);
+    const first = CHALLENGES[0];
+    setActiveId(first.id);
+    setSelectedPackSlug(first.packSlug);
+    setSurface("hub");
+    setCode(first.starterCode);
+    setResult(null);
+    setRanSource("");
+    setRunError(null);
+    setRecentReward(null);
+    setPassMoment(false);
+    setCompletionAssistance(null);
+    setIsRunning(false);
+    setPlaying(false);
+    setCursor(0);
+    setQuestNotebookOpen(false);
+    setSolutionConfirmOpen(false);
+    setResetConfirmOpen(false);
+    if (message) setSessionError(message);
+  }, [abortRequests]);
+
+  const handleAuthResponse = useCallback((response: Response) => {
+    if (response.status !== 401) return false;
+    clearSignedInState("Your session ended. Sign in again to keep going.");
+    return true;
+  }, [clearSignedInState]);
+
+  /** Adopts a save without letting a delayed initial load replace live editor work. */
+  const applySave = useCallback((displayName: string, saved: unknown, released: Revealed | undefined, preserveEditor = false) => {
     const loaded = normalizeProgress(saved);
-    const challenge = activeChallengeRef.current;
+    const restoredId = validLastChallengeId(loaded.lastChallengeId, CHALLENGE_IDS);
+    const challenge = restoredId ? CHALLENGE_BY_ID[restoredId] : activeChallengeRef.current;
+    serverVersionRef.current = Math.max(serverVersionRef.current, loaded.version);
     setUserName(displayName);
     setUserNameDraft(displayName);
     setProgress(loaded);
     setRevealed(released ?? EMPTY_REVEALED);
-    // Set the editor in the same render as the progress, so the draft autosave below
-    // never sees starter code next to a loaded profile and writes it over the draft.
-    setCode(loaded.savedCode[challenge.id] ?? challenge.starterCode);
+    if (!preserveEditor) {
+      setActiveId(challenge.id);
+      setSelectedPackSlug(challenge.packSlug);
+      setCode(loaded.savedCode[challenge.id] ?? challenge.starterCode);
+    }
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    const { controller, generation } = beginRequest();
+    const editorAtStart = editorGenerationRef.current;
     const lastName = safeLocalStorageGet(SESSION_NAME_KEY);
     if (lastName) setUserNameDraft(lastName);
     void (async () => {
       try {
-        const session = await (await fetch("/api/session", { cache: "no-store" })).json() as { authenticated?: boolean; displayName?: string; provider?: "local" | "supabase" };
+        const sessionResponse = await fetch("/api/session", { cache: "no-store", signal: controller.signal });
+        const session = await readApiPayload(sessionResponse, "Could not load your session. Retry or sign in again.") as { authenticated?: boolean; displayName?: string; provider?: "local" | "supabase" };
+        if (!requestIsCurrent(generation)) return;
         if (session.provider) setAuthProvider(session.provider);
-        // Local logout keeps the opaque cookie so a later display-name sign-in
-        // resumes the same save. Supabase logout invalidates the auth session.
         if (session.provider === "local" && safeLocalStorageGet(SIGNED_OUT_KEY)) return;
-        if (cancelled || !session.authenticated || !session.displayName) return;
-        const response = await fetch("/api/progress", { cache: "no-store" });
-        if (!response.ok || cancelled) return;
-        const saved = await response.json() as { progress?: unknown; revealed?: Revealed };
-        if (!cancelled) applySave(session.displayName, saved.progress, saved.revealed);
-      } catch {
-        if (!cancelled) setSessionError("Could not reach the server. Sign in to retry.");
+        if (!session.authenticated || !session.displayName) return;
+        const response = await fetch("/api/progress", { cache: "no-store", signal: controller.signal });
+        if (handleAuthResponse(response) || !requestIsCurrent(generation)) return;
+        const saved = await readApiPayload(response, "Could not load your save. Retry shortly.") as { progress?: unknown; revealed?: Revealed };
+        if (requestIsCurrent(generation)) applySave(session.displayName, saved.progress, saved.revealed, editorGenerationRef.current !== editorAtStart);
+      } catch (error) {
+        if (!isAbortError(error) && requestIsCurrent(generation)) setSessionError(error instanceof Error ? error.message : "Could not reach the server. Sign in to retry.");
+      } finally {
+        endRequest(controller);
+        if (requestIsCurrent(generation)) setSessionLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [applySave]);
+    return () => controller.abort();
+  }, [applySave, beginRequest, endRequest, handleAuthResponse, requestIsCurrent]);
 
-  // Drafts, attempts and preferences are the only state the client writes; the server ignores the rest.
-  const { attempts, savedCode, savedCodeVersions, friendsEnabled } = progress;
-  const unsavedRef = useRef<string | null>(null);
-  /**
-   * Sends any pending save now. Pass `closing` when the page may be going away: the request is
-   * then marked keepalive so it can outlive the page. Browsers refuse large keepalive bodies, so
-   * ordinary saves never use it and an oversized closing save falls back to a normal request.
-   */
+  // Drafts, attempts, resume position and preferences are the only client-owned fields.
+  const { attempts, savedCode, savedCodeVersions, friendsEnabled, lastChallengeId, lastChallengeVersion } = progress;
   const flushSave = useCallback((closing = false) => {
     const body = unsavedRef.current;
-    if (body === null) return;
+    if (body === null || !userName) return;
     unsavedRef.current = null;
     const keepalive = closing && new Blob([body]).size <= KEEPALIVE_MAX_BYTES;
-    const keepForRetry = () => { if (unsavedRef.current === null) unsavedRef.current = body; };
-    fetch("/api/progress", { method: "PUT", headers: { "content-type": "application/json" }, body, keepalive })
+    const keepForRetry = () => { if (unsavedRef.current === null && userName) unsavedRef.current = body; };
+    const { controller, generation } = beginRequest();
+    fetch("/api/progress", { method: "PUT", headers: { "content-type": "application/json" }, body, keepalive, signal: controller.signal })
       .then(async (response) => {
-        if (!response.ok) { if (response.status !== 401) keepForRetry(); return; }
-        const saved = await response.json() as { progress?: unknown };
+        if (handleAuthResponse(response) || !requestIsCurrent(generation)) return;
+        if (!response.ok) { keepForRetry(); return; }
+        const saved = await readApiPayload(response, "Could not save your latest changes. They will retry automatically.") as { progress?: unknown; revealed?: Revealed };
+        if (!requestIsCurrent(generation)) return;
         const normalized = normalizeProgress(saved.progress);
-        setProgress((current) => current.version === normalized.version && sameNumberRecord(current.savedCodeVersions, normalized.savedCodeVersions)
-          ? current
-          : ({ ...current, version: normalized.version, savedCodeVersions: normalized.savedCodeVersions }));
+        const appliesServerState = shouldApplyServerSnapshot(serverVersionRef.current, normalized.version);
+        if (appliesServerState) serverVersionRef.current = normalized.version;
+        setProgress((current) => {
+          const base = appliesServerState ? mergeServerSnapshot(current, normalized) as ProgressState : current;
+          return {
+            ...base,
+            version: Math.max(base.version, normalized.version),
+            savedCodeVersions: mergeRevisionRecord(base.savedCodeVersions, normalized.savedCodeVersions),
+            lastChallengeVersion: Math.max(base.lastChallengeVersion, normalized.lastChallengeVersion)
+          };
+        });
+        if (appliesServerState && saved.revealed) setRevealed(saved.revealed);
       })
-      // A save that did not go through stays pending, so the next change or flush sends it again.
-      .catch(keepForRetry);
-  }, []);
+      .catch((error) => { if (!isAbortError(error) && requestIsCurrent(generation)) keepForRetry(); })
+      .finally(() => endRequest(controller));
+  }, [beginRequest, endRequest, handleAuthResponse, requestIsCurrent, userName]);
   useEffect(() => {
     if (!userName) return;
-    unsavedRef.current = JSON.stringify({ progress: { attempts, savedCode, savedCodeVersions, friendsEnabled } });
+    unsavedRef.current = JSON.stringify({ progress: { attempts, savedCode, savedCodeVersions, friendsEnabled, lastChallengeId, lastChallengeVersion } });
     const timer = window.setTimeout(() => flushSave(), SAVE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [attempts, savedCode, savedCodeVersions, friendsEnabled, userName, flushSave]);
+  }, [attempts, savedCode, savedCodeVersions, friendsEnabled, lastChallengeId, lastChallengeVersion, userName, flushSave]);
   useEffect(() => {
     const onPageHide = () => flushSave(true);
     window.addEventListener("pagehide", onPageHide);
@@ -308,10 +387,16 @@ export default function Home() {
     setProgress((current) => current.savedCode[activeChallenge.id] === code ? current : ({ ...current, savedCode: { ...current.savedCode, [activeChallenge.id]: code } }));
   }, [activeChallenge.id, code, userName]);
 
-  // A ref, not state: the keyboard shortcut can fire twice before a re-render disables anything.
-  const runInFlightRef = useRef(false);
+  const adoptServerOwned = useCallback((incoming: ServerOwned, released?: Revealed) => {
+    if (!shouldApplyServerSnapshot(serverVersionRef.current, incoming.version)) return false;
+    serverVersionRef.current = incoming.version;
+    setProgress((current) => mergeServerSnapshot(current, incoming) as ProgressState);
+    if (released) setRevealed(released);
+    return true;
+  }, []);
+
   const submit = useCallback(async (mode: "run" | "submit" = "run") => {
-    if (runInFlightRef.current || !userName) return;
+    if (runInFlightRef.current || !userName || sessionLoading) return;
     if (isActiveLocked) {
       setRunError("This challenge is locked. Clear the prerequisite quests first.");
       return;
@@ -322,6 +407,7 @@ export default function Home() {
     setResult(null);
     setRecentReward(null);
     setPassMoment(false);
+    setCompletionAssistance(null);
     setPlaying(false);
     const context = {
       challengeId: activeChallenge.id,
@@ -332,33 +418,36 @@ export default function Home() {
     };
     // The player may switch quests while this runs; only show the outcome on the quest it belongs to.
     const stillOnThisQuest = () => activeChallengeRef.current.id === context.challengeId;
+    const { controller, generation } = beginRequest();
     try {
       const response = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: code, challengeId: context.challengeId, packSlug: context.packSlug, mode })
+        body: JSON.stringify({ source: code, challengeId: context.challengeId, packSlug: context.packSlug, mode }),
+        signal: controller.signal
       });
-      const payload = await response.json();
-      if (response.status === 401) {
-        // The server no longer knows this session; stop presenting the profile as signed in.
-        setUserName(null);
-        setSessionError("Your session ended. Sign in again to keep going.");
-        return;
-      }
+      if (handleAuthResponse(response) || !requestIsCurrent(generation)) return;
+      const payload = await readApiPayload(response, "The runner returned an unreadable response. Retry in a moment.");
       if (!response.ok) throw new Error(payload.error ?? "Runner request failed");
       const runResult = payload as RunResponse;
-      if (stillOnThisQuest()) {
+      if (!requestIsCurrent(generation)) return;
+      adoptServerOwned(runResult.progress);
+      if (stillOnThisQuest() && requestIsCurrent(generation)) {
         setResult(runResult);
         setRanSource(code);
         setCursor(0);
         if (runResult.passed && mode === "submit") {
           setPassMoment(true);
-          window.setTimeout(() => setPassMoment(false), 1800);
+          setCompletionAssistance(runResult.progress.solutionOpened[context.challengeId]
+            ? "solution"
+            : (runResult.progress.hintsOpened[context.challengeId] ?? 0) > 0 && (activePack.rewards?.xp?.hintAssistedMultiplier ?? 1) < 1 ? "hint" : null);
+          window.setTimeout(() => { if (requestIsCurrent(generation)) setPassMoment(false); }, 1800);
         }
         setRecentReward(runResult.reward);
       }
-      recordAttempt(attemptFromResult(runResult, context), runResult.progress);
+      recordAttempt(attemptFromResult(runResult, context));
     } catch (error) {
+      if (isAbortError(error) || !requestIsCurrent(generation)) return;
       const message = error instanceof Error ? error.message : "Unknown run error";
       if (stillOnThisQuest()) {
         setRunError(message);
@@ -368,10 +457,13 @@ export default function Home() {
       // Submissions tab never silently stays empty after Run basic / Submit all.
       recordAttempt(attemptFromFailure(message, context));
     } finally {
-      runInFlightRef.current = false;
-      setIsRunning(false);
+      endRequest(controller);
+      if (requestIsCurrent(generation)) {
+        runInFlightRef.current = false;
+        setIsRunning(false);
+      }
     }
-  }, [activeChallenge, code, isActiveLocked, progress.hintsOpened, progress.solutionOpened, userName]);
+  }, [activeChallenge, activePack.rewards?.xp?.hintAssistedMultiplier, adoptServerOwned, beginRequest, code, endRequest, handleAuthResponse, isActiveLocked, progress.hintsOpened, progress.solutionOpened, requestIsCurrent, sessionLoading, userName]);
 
   useEffect(() => {
     if (!playing || events.length === 0) return;
@@ -390,62 +482,66 @@ export default function Home() {
   async function signIn() {
     const identifier = userNameDraft.trim();
     if (!identifier) {
-      setSessionError(authProvider === "supabase" ? "Enter your email to sign in." : "Enter a name to sign in.");
+      setSessionError(authProvider === "supabase" ? "Enter your email to sign in." : "Enter a display name to sign in.");
       return;
     }
+    if (sessionLoading) return;
     setSessionError(null);
+    const { controller, generation } = beginRequest();
     try {
       const body = authProvider === "supabase" ? { email: identifier } : { displayName: identifier };
-      const response = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      const session = await response.json() as { displayName?: string; progress?: unknown; revealed?: Revealed; error?: string; pending?: boolean; message?: string };
+      const response = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
+      const session = await readApiPayload(response, "The sign-in service returned an unreadable response. Retry shortly.") as { displayName?: string; progress?: unknown; revealed?: Revealed; error?: string; pending?: boolean; message?: string };
       if (!response.ok) throw new Error(session.error ?? "Sign-in failed.");
+      if (!requestIsCurrent(generation)) return;
       if (session.pending) {
         setSessionError(session.message ?? "Check your email for a sign-in link.");
         return;
       }
+      abortRequests();
       safeLocalStorageSet(SESSION_NAME_KEY, identifier);
       safeLocalStorageRemove(SIGNED_OUT_KEY);
       applySave(session.displayName ?? identifier, session.progress, session.revealed);
     } catch (error) {
-      setSessionError(error instanceof Error ? error.message : "Could not reach the server. Try again.");
+      if (!isAbortError(error) && requestIsCurrent(generation)) setSessionError(error instanceof Error ? error.message : "Could not reach the server. Try again.");
+    } finally {
+      endRequest(controller);
     }
   }
 
   /** Hides the profile on this browser. The save stays on the server and resumes at the next sign-in. */
   async function signOut() {
-    flushSave(true);
-    await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
+    clearSignedInState();
     if (authProvider === "local") safeLocalStorageSet(SIGNED_OUT_KEY, "1");
     else safeLocalStorageRemove(SIGNED_OUT_KEY);
-    setUserName(null);
-    setProgress(EMPTY_PROGRESS);
-    setRevealed(EMPTY_REVEALED);
-    setCode(activeChallenge.starterCode);
-    setResult(null);
-    setRunError(null);
-    setRecentReward(null);
-    setPassMoment(false);
+    await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
   }
 
-  function recordAttempt(attempt: Attempt, serverOwned?: ServerOwned) {
-    setProgress((current) => ({ ...current, ...serverOwned, attempts: appendAttempt(current.attempts, attempt) }));
+  function recordAttempt(attempt: Attempt) {
+    setProgress((current) => ({ ...current, attempts: appendAttempt(current.attempts, attempt) }));
   }
 
-  /** Asks the server to change server-owned state, then adopts what it returns. */
+  /** Asks the server to change server-owned state, then adopts only a monotonic response. */
   async function progressAction(action: "open_hint" | "open_solution" | "unlock_shop_preview", challengeId?: string) {
+    if (!userName || sessionLoading) return;
+    const { controller, generation } = beginRequest();
     try {
-      const response = await fetch("/api/progress", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, challengeId }) });
-      const payload = await response.json() as { progress?: unknown; revealed?: Revealed; error?: string };
+      const response = await fetch("/api/progress", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, challengeId }), signal: controller.signal });
+      if (handleAuthResponse(response) || !requestIsCurrent(generation)) return;
+      const payload = await readApiPayload(response, "The server returned an unreadable response. Retry that action.") as { progress?: unknown; revealed?: Revealed; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Could not save that action.");
-      const { cleared, solutionOpened, hintsOpened, reviews, rewards } = normalizeProgress(payload.progress);
-      setProgress((current) => ({ ...current, cleared, solutionOpened, hintsOpened, reviews, rewards }));
-      setRevealed(payload.revealed ?? EMPTY_REVEALED);
+      if (!requestIsCurrent(generation)) return;
+      const normalized = normalizeProgress(payload.progress);
+      adoptServerOwned(normalized, payload.revealed ?? EMPTY_REVEALED);
     } catch (error) {
-      setRunError(error instanceof Error ? error.message : "Could not save that action.");
+      if (!isAbortError(error) && requestIsCurrent(generation)) setRunError(error instanceof Error ? error.message : "Could not save that action.");
+    } finally {
+      endRequest(controller);
     }
   }
 
   function applyEditorEdit(edit: EditorEdit) {
+    editorGenerationRef.current += 1;
     setCode(edit.value);
     window.requestAnimationFrame(() => {
       const element = textareaRef.current;
@@ -464,14 +560,18 @@ export default function Home() {
 
   function selectChallenge(id: string) {
     const challenge = CHALLENGE_BY_ID[id];
-    if (challenge) setSelectedPackSlug(challenge.packSlug);
+    if (!challenge) return;
+    editorGenerationRef.current += 1;
+    setSelectedPackSlug(challenge.packSlug);
     setActiveId(id);
+    if (userName) setProgress((current) => current.lastChallengeId === id ? current : ({ ...current, lastChallengeId: id }));
     setSurface("solve");
     setQuestNotebookOpen(false);
     setSolutionConfirmOpen(false);
     setResetConfirmOpen(false);
     setRecentReward(null);
     setPassMoment(false);
+    setCompletionAssistance(null);
     setRunError(null);
   }
 
@@ -521,20 +621,55 @@ export default function Home() {
     }
   }
 
+  const closeNotebook = useCallback(() => setQuestNotebookOpen(false), []);
+  useEffect(() => {
+    if (!questNotebookOpen) return;
+    notebookReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : notebookToggleRef.current;
+    window.requestAnimationFrame(() => tabRefs.current[SOLVE_TABS.indexOf(solveTab)]?.focus());
+    return () => {
+      const target = notebookReturnFocusRef.current;
+      window.requestAnimationFrame(() => target?.focus());
+    };
+  }, [questNotebookOpen]);
+
+  function handleNotebookKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeNotebook();
+      return;
+    }
+    const tabIndex = tabRefs.current.indexOf(event.target as HTMLButtonElement);
+    if (tabIndex >= 0 && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+      event.preventDefault();
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const next = (tabIndex + direction + SOLVE_TABS.length) % SOLVE_TABS.length;
+      setSolveTab(SOLVE_TABS[next]);
+      tabRefs.current[next]?.focus();
+      return;
+    }
+    if (event.key !== "Tab" || !notebookRef.current) return;
+    const focusable = [...notebookRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+
   return (
     <main className="cyber-bit-world maze-grid-field pixel-console min-h-screen text-[var(--qc-text)]">
       <section className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 lg:px-8">
-        <header className={surface === "solve" ? "sticky top-0 z-40 rounded-none border-b border-cyan-300/20 bg-slate-950/95 px-3 py-2 backdrop-blur" : "pixel-panel rounded-3xl p-6"}>
+        <header inert={questNotebookOpen ? true : undefined} className={surface === "solve" ? "sticky top-0 z-40 rounded-none border-b border-cyan-300/20 bg-slate-950/95 px-3 py-2 backdrop-blur" : "pixel-panel rounded-3xl p-6"}>
           {surface === "solve" ? (
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <div className="flex flex-wrap items-center gap-2">
                 <button className="control px-3 py-1" onClick={() => setSurface("hub")}>Home</button>
                 <span className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-2 py-1 text-cyan-100">Quest Coder</span>
                 <span className="max-w-[40vw] truncate text-slate-300">{activeChallenge.title}</span>
-                <StatusPill label={result?.execution.mode ? `${result.execution.mode} · ${result.cases.length} cases` : "compiler ready"} tone={result?.passed ? "green" : "cyan"} />
+                <StatusPill label={result?.execution.mode ? (resultMatchesCode ? `${result.execution.mode} · ${result.cases.length} cases` : "previous run") : "compiler ready"} tone={result?.passed && resultMatchesCode ? "green" : "cyan"} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={() => void signOut()}>Log out</button></> : <><input className="w-32 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Your name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950" onClick={() => void signIn()}>Sign in</button></>}
+                {userName ? <><span className="text-slate-400">{userName}</span><button className="control px-3 py-1" onClick={() => void signOut()}>Log out</button></> : <><input className="w-32 rounded-lg border border-white/10 bg-slate-950 px-2 py-1" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Display name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} disabled={sessionLoading} /><button className="rounded-lg bg-cyan-300 px-3 py-1 font-bold text-slate-950 disabled:opacity-60" disabled={sessionLoading} onClick={() => void signIn()}>Sign in</button></>}
               </div>
             </div>
           ) : (
@@ -548,7 +683,7 @@ export default function Home() {
                   {userName ? (
                     <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-300">Signed in as <b className="text-cyan-200">{userName}</b></span><button className="control" onClick={() => void signOut()}>Log out</button></div>
                   ) : (
-                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Your name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950" onClick={() => void signIn()}>Sign in</button></div>
+                    <div className="flex flex-wrap items-center gap-2"><input className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm" value={userNameDraft} placeholder={authProvider === "supabase" ? "Email" : "Display name"} onChange={(event) => setUserNameDraft(event.target.value)} aria-label={authProvider === "supabase" ? "Email" : "User name"} disabled={sessionLoading} /><button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 disabled:opacity-60" disabled={sessionLoading} onClick={() => void signIn()}>Sign in</button></div>
                   )}
                 </div>
               </div>
@@ -571,6 +706,7 @@ export default function Home() {
               <StatBar stat={statBar} />
             </>
           )}
+          {sessionLoading ? <p className="mt-2 text-xs text-cyan-200" role="status" data-testid="session-loading">Loading save…</p> : null}
           {sessionError ? <p className="mt-2 text-xs text-rose-200" role="alert">{sessionError}</p> : null}
         </header>
 
@@ -607,7 +743,7 @@ export default function Home() {
           <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Questions list</h2><p className="text-sm text-slate-400">Select a question to open the focused solve screen.</p></div><div className="flex flex-wrap gap-2 text-xs">{(["All", "Available", "Cleared", "Review", "Boss"] as QuestionFilter[]).map((filter) => <button key={filter} className={questionFilter === filter ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => setQuestionFilter(filter)}>{filter}</button>)}</div></div><div className="grid gap-3 md:grid-cols-2">{CHALLENGES.filter((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); if (questionFilter === "Available") return !locked && !cleared && !challenge.isBoss; if (questionFilter === "Cleared") return cleared; if (questionFilter === "Review") return reviewDue; if (questionFilter === "Boss") return challenge.isBoss; return true; }).map((challenge) => { const locked = !isUnlocked(challenge, progress); const cleared = Boolean(progress.cleared[challenge.id]); const reviewDue = dueReviews.some((item) => item.record.bossId === challenge.id); const status = reviewDue ? "review due" : cleared ? "cleared" : locked ? "locked" : challenge.isBoss ? "boss" : "available"; return <button key={challenge.id} className={`rounded-2xl border border-white/10 bg-white/5 p-4 text-left ${locked ? "cursor-not-allowed opacity-60" : "hover:border-cyan-300"}`} onClick={() => selectChallenge(challenge.id)} disabled={locked} title={locked ? LOCKED_REASON : undefined}><b>{challenge.isBoss ? "Boss" : `Quest ${challenge.order ?? ""}`}: {challenge.title}</b><p className="mt-1 text-xs text-slate-400">{challenge.packTitle} · {(progress.attempts[challenge.id] ?? []).length} attempts</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill label={status} tone={reviewDue ? "purple" : cleared ? "green" : locked ? "muted" : challenge.isBoss ? "pink" : "cyan"} />{challenge.packConcepts.slice(0, 2).map((concept) => <StatusPill key={concept} label={concept} tone="purple" />)}</div></button>; })}</div></section>
         ) : (
           <section className="one-question-workspace relative min-h-[calc(100vh-4rem)]" aria-label="Full-screen compiler workspace">
-            <section className="pixel-panel rounded-2xl p-3 shadow-xl" aria-label="Code editor">
+            <section inert={questNotebookOpen ? true : undefined} className="pixel-panel rounded-2xl p-3 shadow-xl" aria-label="Code editor">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.25em] text-emerald-300">Python 3</p>
@@ -616,40 +752,41 @@ export default function Home() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {resetConfirmOpen ? <><span className="self-center text-xs text-amber-100">Replace your code with the starter code?</span><button className="rounded-xl bg-amber-300 px-3 py-2 text-sm font-bold text-slate-950" onClick={() => { setCode(activeChallenge.starterCode); setResetConfirmOpen(false); }}>Reset code</button><button className="control" onClick={() => setResetConfirmOpen(false)}>Keep my code</button></> : <button className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/10" onClick={() => setResetConfirmOpen(true)}>Reset</button>}
-                  <button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-cyan-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit("run")}>{isRunning ? "Running…" : "Run basic ▶"}</button>
-                  <button className="rounded-xl bg-yellow-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-yellow-200 disabled:opacity-60" disabled={isRunning || isActiveLocked || !userName} onClick={() => void submit("submit")}>{activeChallenge.isBoss ? "Submit Boss" : "Submit all"}</button>
+                  <button className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-cyan-200 disabled:opacity-60" disabled={sessionLoading || isRunning || isActiveLocked || !userName} onClick={() => void submit("run")}>{isRunning ? "Running…" : "Run basic ▶"}</button>
+                  <button className="rounded-xl bg-yellow-300 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-yellow-200 disabled:opacity-60" disabled={sessionLoading || isRunning || isActiveLocked || !userName} onClick={() => void submit("submit")}>{activeChallenge.isBoss ? "Submit Boss" : "Submit all"}</button>
                 </div>
               </div>
               <div className="rounded-2xl border border-slate-700 bg-slate-950/95 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400"><span>solution.py</span><span>Tab/Shift+Tab indent · Ctrl/Cmd+Enter runs basic cases</span></div>
                 <div className="grid grid-cols-[3rem_1fr] gap-3">
                   <pre ref={gutterRef} aria-hidden="true" className="select-none overflow-hidden text-right font-mono text-sm leading-6 text-slate-500">{lineNumbers(code)}</pre>
-                  <textarea ref={textareaRef} aria-label="Python solution editor" className="min-h-[62vh] resize-y bg-transparent font-mono text-sm leading-6 text-slate-100 outline-none [font-feature-settings:'liga'_0,'calt'_0]" spellCheck={false} wrap="off" value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={handleEditorKeyDown} onScroll={(event) => { if (gutterRef.current) gutterRef.current.scrollTop = event.currentTarget.scrollTop; }} />
+                  <textarea ref={textareaRef} aria-label="Python solution editor" className="min-h-[62vh] resize-y bg-transparent font-mono text-sm leading-6 text-slate-100 outline-none [font-feature-settings:'liga'_0,'calt'_0]" spellCheck={false} wrap="off" value={code} onChange={(event) => { editorGenerationRef.current += 1; setCode(event.target.value); }} onKeyDown={handleEditorKeyDown} onScroll={(event) => { if (gutterRef.current) gutterRef.current.scrollTop = event.currentTarget.scrollTop; }} />
                 </div>
               </div>
               <div className="mt-3 rounded-2xl border border-emerald-300/20 bg-black/40 p-4" aria-label="Console result drawer">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="font-bold">Console</h3>
-                  <div className="flex flex-wrap items-center gap-2"><StatusPill label={result?.execution.mode ? `${result.execution.mode} suite` : runError ? "runner message" : "waiting for run"} tone={result?.passed ? "green" : runError ? "cyan" : "muted"} />{result?.execution.replayCaseId ? <StatusPill label={`animation ${result.execution.replayCaseId}`} tone="purple" /> : null}<button className="control px-3 py-1 text-xs" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Submissions"); }}>Submissions ({activeAttempts.length})</button></div>
+                  <div className="flex flex-wrap items-center gap-2"><StatusPill label={result?.execution.mode ? (resultMatchesCode ? `${result.execution.mode} suite` : "previous run") : runError ? "runner message" : "waiting for run"} tone={result?.passed && resultMatchesCode ? "green" : runError ? "cyan" : "muted"} />{result?.execution.replayCaseId ? <StatusPill label={`animation ${result.execution.replayCaseId}`} tone="purple" /> : null}<button className="control px-3 py-1 text-xs" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Submissions"); }}>Submissions ({activeAttempts.length})</button></div>
                 </div>
-                {!userName ? <p className="mb-3 rounded-xl border border-yellow-300/40 bg-yellow-300/10 p-3 text-sm text-yellow-50" data-testid="signed-out-prompt"><b>Sign in to run code.</b> Enter a name in the top bar; your drafts and clears are saved to that profile.</p> : isActiveLocked ? <p className="mb-3 rounded-xl border border-slate-500/40 bg-slate-500/10 p-3 text-sm text-slate-200">This quest is locked. {LOCKED_REASON}.</p> : null}
+                {!userName ? <p className="mb-3 rounded-xl border border-yellow-300/40 bg-yellow-300/10 p-3 text-sm text-yellow-50" data-testid="signed-out-prompt"><b>Sign in to run code.</b> Enter {authProvider === "supabase" ? "your email" : "a display name"} in the top bar; your drafts and clears are saved to that account.</p> : isActiveLocked ? <p className="mb-3 rounded-xl border border-slate-500/40 bg-slate-500/10 p-3 text-sm text-slate-200">This quest is locked. {LOCKED_REASON}.</p> : null}
                 {runError ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100" role="alert">{runError}</p> : null}
-                {result?.passed && result.execution.mode === "run" ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-300/10 p-3 text-sm text-cyan-50" role="status"><b>Basic checks passed.</b> Submit all to clear this quest and unlock the next stage.</p> : null}
+                {result && !resultMatchesCode ? <p className="mb-3 rounded-xl border border-purple-300/30 bg-purple-300/10 p-3 text-sm text-purple-50" role="status"><b>Previous run.</b> The editor has changed; run the current code to refresh this result.</p> : null}
+                {result?.passed && result.execution.mode === "run" && resultMatchesCode ? <p className="mb-3 rounded-xl border border-cyan-300/40 bg-cyan-300/10 p-3 text-sm text-cyan-50" role="status"><b>Basic checks passed.</b> Submit all to clear this quest and unlock the next stage.</p> : null}
                 {result ? <ResultSummary result={result} onHint={() => { setQuestNotebookOpen(true); setSolveTab("Hints"); }} /> : null}
                 {result ? <CasesPanel result={result} /> : <p className="text-sm text-slate-400">Run basic cases or submit the full suite. Open the Quest Notebook if you need the prompt, examples, hints, animation, or solution gate.</p>}
                 {result?.replay ? <button className="control mt-3" onClick={() => { setQuestNotebookOpen(true); setSolveTab("Animation"); }}>View Animation</button> : null}
               </div>
             </section>
 
-            {result?.passed && result.execution.mode === "submit" ? <div className="fixed bottom-24 left-1/2 z-40 w-[min(42rem,calc(100vw-2rem))] -translate-x-1/2" data-testid="completion-floating-panel"><CompletionMoment showFireworks={passMoment} reward={recentReward} isBoss={activeChallenge.isBoss} nextTitle={nextChallenge?.title ?? null} onNext={moveToNextQuest} /></div> : null}
+            {result?.passed && result.execution.mode === "submit" && resultMatchesCode ? <div inert={questNotebookOpen ? true : undefined} className="fixed bottom-24 left-1/2 z-40 w-[min(42rem,calc(100vw-2rem))] -translate-x-1/2" data-testid="completion-floating-panel"><CompletionMoment showFireworks={passMoment} reward={recentReward} isBoss={activeChallenge.isBoss} assisted={completionAssistance} nextTitle={nextChallenge?.title ?? null} onNext={moveToNextQuest} /></div> : null}
 
-            <button className="quest-notebook-toggle fixed bottom-5 right-5 z-50 rounded-2xl border-2 border-yellow-200/60 bg-yellow-300 px-4 py-3 font-black text-slate-950 shadow-2xl shadow-yellow-500/20" aria-label={questNotebookOpen ? "Close quest notebook" : "Open quest notebook"} onClick={() => setQuestNotebookOpen((value) => !value)}>📓 Quest Notebook</button>
+            <button ref={notebookToggleRef} tabIndex={questNotebookOpen ? -1 : 0} className="quest-notebook-toggle fixed bottom-5 right-5 z-50 rounded-2xl border-2 border-yellow-200/60 bg-yellow-300 px-4 py-3 font-black text-slate-950 shadow-2xl shadow-yellow-500/20" aria-label={questNotebookOpen ? "Close quest notebook" : "Open quest notebook"} aria-expanded={questNotebookOpen} aria-controls="quest-notebook-dialog" onClick={() => setQuestNotebookOpen((value) => !value)}>📓 Quest Notebook</button>
 
             {questNotebookOpen ? (
-              <aside className="quest-notebook-panel fixed bottom-24 right-5 z-50 max-h-[78vh] w-[min(42rem,calc(100vw-2.5rem))] overflow-auto rounded-3xl border-2 border-cyan-300/40 bg-slate-950/98 p-5 shadow-2xl shadow-cyan-950/40" aria-label="Quest notebook pop-out">
+              <aside ref={notebookRef} id="quest-notebook-dialog" role="dialog" aria-modal="true" aria-labelledby="quest-notebook-title" aria-describedby="quest-notebook-description" onKeyDown={handleNotebookKeyDown} className="quest-notebook-panel fixed bottom-24 right-5 z-50 max-h-[78vh] w-[min(42rem,calc(100vw-2.5rem))] overflow-auto rounded-3xl border-2 border-cyan-300/40 bg-slate-950/98 p-5 shadow-2xl shadow-cyan-950/40">
                 <div className="mb-4 flex items-start justify-between gap-3">
-                  <div><p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Quest Notebook</p><h2 className="mt-1 text-2xl font-black">{activeChallenge.title}</h2><p className="text-sm text-slate-400">{activePack.title} · {isActiveLocked ? "locked" : activeChallenge.isBoss ? "boss fight" : "available"}</p></div>
-                  <button className="control" onClick={() => setQuestNotebookOpen(false)}>Close</button>
+                  <div><p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Quest Notebook</p><h2 id="quest-notebook-title" className="mt-1 text-2xl font-black">{activeChallenge.title}</h2><p id="quest-notebook-description" className="text-sm text-slate-400">{activePack.title} · {isActiveLocked ? "locked" : activeChallenge.isBoss ? "boss fight" : "available"}</p></div>
+                  <button className="control" onClick={closeNotebook}>Close</button>
                 </div>
 
                 <div className="neon-maze-panel mb-4 rounded-2xl p-3" aria-label="Mini quest path">
@@ -658,17 +795,19 @@ export default function Home() {
                 </div>
 
                 <div className="mb-4 flex flex-wrap gap-2 text-xs" role="tablist" aria-label="Quest notebook tabs">
-                  {SOLVE_TABS.map((tab) => (
-                    <button key={tab} role="tab" aria-selected={solveTab === tab} className={solveTab === tab ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => { if (tab !== "Solution") setSolutionConfirmOpen(false); setSolveTab(tab); }}>{tab}</button>
+                  {SOLVE_TABS.map((tab, index) => (
+                    <button ref={(element) => { tabRefs.current[index] = element; }} key={tab} id={`quest-notebook-tab-${tab.toLowerCase()}`} role="tab" aria-selected={solveTab === tab} aria-controls={`quest-notebook-panel-${tab.toLowerCase()}`} tabIndex={solveTab === tab ? 0 : -1} className={solveTab === tab ? "rounded-xl bg-cyan-300 px-3 py-2 font-bold text-slate-950" : "control"} onClick={() => { if (tab !== "Solution") setSolutionConfirmOpen(false); setSolveTab(tab); }}>{tab}</button>
                   ))}
                 </div>
 
-                {solveTab === "Question" ? <ProblemDetails challenge={activeChallenge} attempts={activeAttempts.length} helpUsed={progress.hintsOpened[activeChallenge.id] ?? 0} /> : null}
-                {solveTab === "Animation" && !replay ? <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300"><h3 className="font-bold text-cyan-100">No replay yet</h3><p className="mt-2">Run basic or Submit all, then come back here to step through one test case line by line.</p></div> : null}
-                {solveTab === "Animation" && replay ? <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3"><OutcomeBadge status={replay.status} passed={replay.passed} /><p className="rounded-xl border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs text-slate-300">Replay case: {result?.execution.replayCaseId ?? result?.replay?.caseId ?? "run code first"}</p><PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} /></div><SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} /><div className="grid gap-4 lg:grid-cols-2"><CodeTrace code={ranSource} activeLine={activeLine} /><VarsPanel vars={latestVars} event={activeEvent} /></div></div> : null}
-                {solveTab === "Hints" ? <HintsPanel opened={revealed.hints[activeChallenge.id] ?? []} total={activeChallenge.hints?.length ?? 0} signedIn={userName !== null} xpShare={activePack.rewards?.xp?.hintAssistedMultiplier ?? 1} onReveal={() => void progressAction("open_hint", activeChallenge.id)} /> : null}
-                {solveTab === "Solution" ? <SolutionGate solution={revealed.solutions[activeChallenge.id]} signedIn={userName !== null} xpShare={activePack.rewards?.xp?.solutionAssistedMultiplier ?? 0.5} confirming={solutionConfirmOpen} onAskConfirm={() => setSolutionConfirmOpen(true)} onCancel={() => setSolutionConfirmOpen(false)} onReveal={() => { void progressAction("open_solution", activeChallenge.id); setSolutionConfirmOpen(false); }} /> : null}
-                {solveTab === "Submissions" ? <div className="space-y-4">{runError ? <p className="rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}<CasesPanel result={result} /><AttemptHistory attempts={activeAttempts} /></div> : null}
+                <div id={`quest-notebook-panel-${solveTab.toLowerCase()}`} role="tabpanel" aria-labelledby={`quest-notebook-tab-${solveTab.toLowerCase()}`} tabIndex={0}>
+                  {solveTab === "Question" ? <ProblemDetails challenge={activeChallenge} attempts={activeAttempts.length} helpUsed={progress.hintsOpened[activeChallenge.id] ?? 0} /> : null}
+                  {solveTab === "Animation" && !replay ? <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300"><h3 className="font-bold text-cyan-100">No replay yet</h3><p className="mt-2">Run basic or Submit all, then come back here to step through one test case line by line.</p></div> : null}
+                  {solveTab === "Animation" && replay ? <div className="space-y-4">{!resultMatchesCode ? <p className="rounded-xl border border-purple-300/30 bg-purple-300/10 p-3 text-sm text-purple-50">Replay from the previous run; it does not describe the current editor source.</p> : null}<div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3"><OutcomeBadge status={replay.status} passed={replay.passed} /><p className="rounded-xl border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs text-slate-300">Replay case: {result?.execution.replayCaseId ?? result?.replay?.caseId ?? "run code first"}</p><PlaybackControls cursor={cursor} total={events.length} playing={playing} speed={speed} onBack={() => setCursor((value) => Math.max(0, value - 1))} onStep={() => setCursor((value) => Math.min(events.length - 1, value + 1))} onSkipStart={() => setCursor(0)} onSkipEnd={() => setCursor(Math.max(events.length - 1, 0))} onToggle={() => setPlaying((value) => !value)} onSpeed={() => setSpeed((value) => PLAY_SPEEDS[(PLAY_SPEEDS.indexOf(value) + 1) % PLAY_SPEEDS.length])} /></div><SceneRenderer replay={replay} activeReadIndex={activeReadIndex} vars={latestVars} mode={sceneMode} /><div className="grid gap-4 lg:grid-cols-2"><CodeTrace code={ranSource} activeLine={activeLine} /><VarsPanel vars={latestVars} event={activeEvent} /></div></div> : null}
+                  {solveTab === "Hints" ? <HintsPanel opened={revealed.hints[activeChallenge.id] ?? []} total={activeChallenge.hints?.length ?? 0} signedIn={userName !== null} xpShare={activePack.rewards?.xp?.hintAssistedMultiplier ?? 1} onReveal={() => void progressAction("open_hint", activeChallenge.id)} /> : null}
+                  {solveTab === "Solution" ? <SolutionGate solution={revealed.solutions[activeChallenge.id]} signedIn={userName !== null} xpShare={activePack.rewards?.xp?.solutionAssistedMultiplier ?? 0.5} confirming={solutionConfirmOpen} onAskConfirm={() => setSolutionConfirmOpen(true)} onCancel={() => setSolutionConfirmOpen(false)} onReveal={() => { void progressAction("open_solution", activeChallenge.id); setSolutionConfirmOpen(false); }} /> : null}
+                  {solveTab === "Submissions" ? <div className="space-y-4">{runError ? <p className="rounded-xl border border-cyan-300/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">{runError}</p> : null}<CasesPanel result={result} /><AttemptHistory attempts={activeAttempts} /></div> : null}
+                </div>
               </aside>
             ) : null}
           </section>
@@ -815,16 +954,26 @@ function normalizeProgress(value: unknown): ProgressState {
     savedCodeVersions: raw.savedCodeVersions && typeof raw.savedCodeVersions === "object" ? raw.savedCodeVersions : {},
     reviews: raw.reviews && typeof raw.reviews === "object" ? raw.reviews : {},
     rewards: { ...EMPTY_REWARDS, ...(raw.rewards ?? {}) },
-    friendsEnabled: Boolean(raw.friendsEnabled)
+    friendsEnabled: Boolean(raw.friendsEnabled),
+    lastChallengeId: validLastChallengeId(raw.lastChallengeId, CHALLENGE_IDS),
+    lastChallengeVersion: Number.isFinite(raw.lastChallengeVersion) ? Math.max(0, Math.floor(raw.lastChallengeVersion ?? 0)) : 0
   };
 }
+async function readApiPayload(response: Response, fallback: string): Promise<Record<string, any>> {
+  const text = await response.text();
+  if (!text.trim()) throw new Error(fallback);
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+    return parsed as Record<string, any>;
+  } catch {
+    throw new Error(fallback);
+  }
+}
+function isAbortError(error: unknown) { return error instanceof DOMException && error.name === "AbortError"; }
 function safeLocalStorageGet(key: string) { try { return window.localStorage.getItem(key); } catch { return null; } }
 function safeLocalStorageSet(key: string, value: string) { try { window.localStorage.setItem(key, value); } catch {} }
 function safeLocalStorageRemove(key: string) { try { window.localStorage.removeItem(key); } catch {} }
-function sameNumberRecord(left: Record<string, number>, right: Record<string, number>) {
-  const keys = Object.keys(left);
-  return keys.length === Object.keys(right).length && keys.every((key) => left[key] === right[key]);
-}
 function buildReviewItems(progress: ProgressState): ReviewItem[] {
   const now = Date.now();
   return Object.values(progress.reviews).map((record) => {

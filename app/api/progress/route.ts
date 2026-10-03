@@ -24,7 +24,12 @@ export async function PUT(request: Request) {
   try { body = await readCappedJson(request, MAX_BODY_BYTES) as { progress?: unknown }; }
   catch (error) { return jsonBodyError(error); }
   if (!body || typeof body.progress !== "object" || body.progress === null) return NextResponse.json({ error: "invalid progress" }, { status: 400 });
-  try { return progressResponse(await writeClientProgress(session.progressKey, body.progress)); }
+  const clientProgress = body.progress as Record<string, unknown>;
+  if ("lastChallengeId" in clientProgress) {
+    const id = clientProgress.lastChallengeId;
+    if (typeof id !== "string" || !findChallengeById(id)) delete clientProgress.lastChallengeId;
+  }
+  try { return progressResponse(await writeClientProgress(session.progressKey, clientProgress)); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "write failed" }, { status: 400 }); }
 }
 

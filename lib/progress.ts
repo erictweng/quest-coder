@@ -18,6 +18,7 @@ export type ReviewRecord = {
 };
 
 export type ServerOwnedProgress = {
+  version: number;
   cleared: Record<string, boolean>;
   solutionOpened: Record<string, boolean>;
   hintsOpened: Record<string, number>;
@@ -31,6 +32,9 @@ export type ClientOwnedProgress = {
   friendsEnabled: boolean;
   /** Per-challenge optimistic revisions used to reject stale draft overwrites. */
   savedCodeVersions: Record<string, number>;
+  /** Last quest explicitly opened by this account, with an optimistic revision. */
+  lastChallengeId?: string;
+  lastChallengeVersion: number;
 };
 
 export type StoredProgress = ServerOwnedProgress & ClientOwnedProgress & { version: number };
@@ -53,6 +57,8 @@ export function emptyProgress(): StoredProgress {
     attempts: {},
     savedCode: {},
     savedCodeVersions: {},
+    lastChallengeId: undefined,
+    lastChallengeVersion: 0,
     reviews: {},
     rewards: { xp: 0, shards: 0, grants: [], shopPreviewUnlocked: false },
     friendsEnabled: false
@@ -92,7 +98,9 @@ export function normalizeClientProgress(value: unknown): ClientOwnedProgress {
     attempts,
     savedCode,
     friendsEnabled: raw.friendsEnabled === true,
-    savedCodeVersions: numberRecord(raw.savedCodeVersions)
+    savedCodeVersions: numberRecord(raw.savedCodeVersions),
+    lastChallengeId: typeof raw.lastChallengeId === "string" && raw.lastChallengeId.length <= 200 ? raw.lastChallengeId : undefined,
+    lastChallengeVersion: nonNegativeInteger(raw.lastChallengeVersion)
   };
 }
 
@@ -130,13 +138,24 @@ export function mergeClientProgress(current: StoredProgress, payload: unknown): 
 
   if (current.friendsEnabled !== incoming.friendsEnabled) changed = true;
 
+  let lastChallengeId = current.lastChallengeId;
+  let lastChallengeVersion = current.lastChallengeVersion;
+  if (incoming.lastChallengeId !== undefined && incoming.lastChallengeVersion === current.lastChallengeVersion
+      && incoming.lastChallengeId !== current.lastChallengeId) {
+    lastChallengeId = incoming.lastChallengeId;
+    lastChallengeVersion += 1;
+    changed = true;
+  }
+
   return {
     ...current,
     version: current.version + (changed ? 1 : 0),
     attempts,
     savedCode,
     savedCodeVersions,
-    friendsEnabled: incoming.friendsEnabled
+    friendsEnabled: incoming.friendsEnabled,
+    lastChallengeId,
+    lastChallengeVersion
   };
 }
 
@@ -224,7 +243,7 @@ export function nextReview(
 
 export function serverOwned(progress: StoredProgress): ServerOwnedProgress {
   const { cleared, solutionOpened, hintsOpened, reviews, rewards } = progress;
-  return { cleared, solutionOpened, hintsOpened, reviews, rewards };
+  return { version: progress.version, cleared, solutionOpened, hintsOpened, reviews, rewards };
 }
 
 function booleanRecord(value: unknown): Record<string, boolean> {

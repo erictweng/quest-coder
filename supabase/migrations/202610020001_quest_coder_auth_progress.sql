@@ -39,6 +39,7 @@ as $$
     'attempts', '{}'::jsonb,
     'savedCode', '{}'::jsonb,
     'savedCodeVersions', '{}'::jsonb,
+    'lastChallengeVersion', 0,
     'reviews', '{}'::jsonb,
     'rewards', jsonb_build_object('xp', 0, 'shards', 0, 'grants', '[]'::jsonb, 'shopPreviewUnlocked', false),
     'friendsEnabled', false
@@ -92,6 +93,9 @@ declare
   current_revision bigint;
   expected_revision bigint;
   merged_attempts jsonb;
+  incoming_last_challenge text;
+  current_last_challenge_version bigint;
+  expected_last_challenge_version bigint;
   changed boolean := false;
 begin
   perform quest_coder.quest_coder_ensure_progress(p_user_id);
@@ -152,6 +156,18 @@ begin
      and coalesce((row_payload->>'friendsEnabled')::boolean, false) is distinct from (p_client->>'friendsEnabled')::boolean then
     next_payload := jsonb_set(next_payload, '{friendsEnabled}', p_client->'friendsEnabled', true);
     changed := true;
+  end if;
+
+  if jsonb_typeof(p_client->'lastChallengeId') = 'string' then
+    incoming_last_challenge := p_client->>'lastChallengeId';
+    current_last_challenge_version := coalesce((row_payload->>'lastChallengeVersion')::bigint, 0);
+    expected_last_challenge_version := coalesce((p_client->>'lastChallengeVersion')::bigint, 0);
+    if expected_last_challenge_version = current_last_challenge_version
+       and row_payload->>'lastChallengeId' is distinct from incoming_last_challenge then
+      next_payload := jsonb_set(next_payload, '{lastChallengeId}', to_jsonb(incoming_last_challenge), true);
+      next_payload := jsonb_set(next_payload, '{lastChallengeVersion}', to_jsonb(current_last_challenge_version + 1), true);
+      changed := true;
+    end if;
   end if;
 
   next_payload := jsonb_set(jsonb_set(next_payload, '{attempts}', next_attempts, true), '{savedCode}', next_code, true);

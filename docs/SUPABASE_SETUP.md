@@ -53,7 +53,7 @@ Use the appropriate Supabase template type when customizing signup, invite, reco
 - Confirm `/api/session` reports `provider: "supabase"` and the authenticated email-derived profile name.
 - Sign in as two users and verify their drafts, attempts, clears, XP, and shards remain isolated.
 - Submit the same passing solution concurrently and verify XP is granted once.
-- Save different challenges from two tabs and verify both drafts and both attempt records remain.
+- Save different challenges from two tabs and verify both drafts and both attempt records remain; confirm a stale tab cannot erase or replace the newer `lastChallengeId` resume pointer.
 - Confirm the browser bundle and deployment environment expose only the URL and publishable key, never `SUPABASE_SERVICE_ROLE_KEY`.
 
 For local fallback verification, leave all three Supabase variables unset and run the normal unit/E2E suite.

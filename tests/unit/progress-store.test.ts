@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { configuredProgressBackend, LocalProgressStore, SupabaseProgressStore } from "../../lib/progress-store.ts";
+import { mergeServerSnapshot, shouldApplyServerSnapshot, validLastChallengeId } from "../../lib/client-progress.ts";
 
 const QUEST = { challengeId: "quest-1", baseXp: 100, shards: 0 };
 const BOSS = { challengeId: "boss", baseXp: 100, shards: 1, review: { packSlug: "pack", topic: "dp", schedule: [1, 3, 7] } };
@@ -87,6 +88,33 @@ test("stale multi-tab saves merge attempts and do not overwrite newer drafts", a
   assert.equal(merged.savedCode["quest-1"], "newer");
   assert.equal(merged.savedCode["quest-2"], "other-tab");
   assert.deepEqual(merged.attempts["quest-1"].map((attempt) => (attempt as { id: string }).id), ["attempt-b", "attempt-a"]);
+});
+
+test("last challenge resume uses optimistic revisions and stale tabs cannot erase or replace it", async () => {
+  const local = store();
+  const user = session(local);
+  const first = await local.writeClient(user, { lastChallengeId: "quest-2", lastChallengeVersion: 0 });
+  assert.equal(first.lastChallengeId, "quest-2");
+  assert.equal(first.lastChallengeVersion, 1);
+  const stale = await local.writeClient(user, { lastChallengeId: "quest-1", lastChallengeVersion: 0 });
+  assert.equal(stale.lastChallengeId, "quest-2");
+  const omitted = await local.writeClient(user, { attempts: {} });
+  assert.equal(omitted.lastChallengeId, "quest-2");
+});
+
+test("client progress helpers reject stale server snapshots and unknown resume ids", () => {
+  const current = {
+    version: 4,
+    cleared: { q: true }, solutionOpened: {}, hintsOpened: {}, reviews: {}, rewards: { xp: 10 },
+    attempts: {}, savedCode: {}, savedCodeVersions: {}, friendsEnabled: false, lastChallengeVersion: 0
+  };
+  const stale = { version: 3, cleared: {}, solutionOpened: {}, hintsOpened: {}, reviews: {}, rewards: { xp: 0 } };
+  assert.equal(shouldApplyServerSnapshot(current.version, stale.version), false);
+  assert.equal(mergeServerSnapshot(current, stale), current);
+  const newer = { ...stale, version: 5, cleared: { q: true, q2: true } };
+  assert.deepEqual(mergeServerSnapshot(current, newer).cleared, { q: true, q2: true });
+  assert.equal(validLastChallengeId("q2", new Set(["q1", "q2"])), "q2");
+  assert.equal(validLastChallengeId("removed", new Set(["q1", "q2"])), undefined);
 });
 
 test("client saves cannot erase authoritative clears during interleaved mutations", async () => {

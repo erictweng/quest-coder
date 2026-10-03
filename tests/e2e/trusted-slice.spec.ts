@@ -4,14 +4,18 @@ import { readFileSync } from "node:fs";
 const pack = JSON.parse(readFileSync("content/server/forest-of-patience-climbing-stairs.json", "utf8"));
 const path = [...pack.quests, pack.boss];
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 async function signIn(page: Page, name: string) {
   await page.goto("/");
-  // Text typed before the page hydrates is discarded, so retry until the sign-in takes.
-  await expect(async () => {
-    await page.getByLabel("User name").fill(name);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page.getByText("Signed in as")).toContainText(name, { timeout: 2_000 });
-  }).toPass({ timeout: 15_000 });
+  await expect(page.getByTestId("session-loading")).toHaveCount(0);
+  await page.getByLabel("User name").fill(name);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByText("Signed in as")).toContainText(name);
 }
 
 async function setCode(page: Page, code: string) {
@@ -192,9 +196,158 @@ test("hints and solutions come from the server", async ({ page, context }) => {
 
   // The line trace shows the code that ran, even after the editor changes.
   await setCode(page, "# edited after the run");
+  await expect(page.getByTestId("completion-floating-panel")).toHaveCount(0);
+  await expect(page.getByText("Previous run.")).toBeVisible();
   await page.getByRole("button", { name: "View Animation" }).click();
   await expect(page.getByText("Line movement").locator("..")).toContainText("count_routes");
   await expect(page.getByText("Line movement").locator("..")).not.toContainText("edited after the run");
+});
+
+test("delayed initial progress cannot replace code typed while the save loads", async ({ page, context }) => {
+  expect((await context.request.post("/api/session", { data: { displayName: "Loading Ranger" } })).ok()).toBeTruthy();
+  await context.request.put("/api/progress", { data: { progress: { savedCode: { [path[0].id]: "# server draft" }, savedCodeVersions: { [path[0].id]: 0 } } } });
+  const gate = deferred();
+  const fetched = deferred();
+  await page.route("**/api/progress", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    fetched.resolve();
+    await gate.promise;
+    await route.fulfill({ response });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Solve", exact: true }).click();
+  await setCode(page, "# typed while loading");
+  await fetched.promise;
+  gate.resolve();
+  await expect(page.getByTestId("session-loading")).toHaveCount(0);
+  await expect(page.getByLabel("Python solution editor")).toHaveValue("# typed while loading");
+});
+
+test("delayed hint cannot roll back a newer submit and delayed submit cannot survive logout", async ({ page }) => {
+  await signIn(page, "Race Ranger");
+  await page.getByRole("button", { name: "Continue Last Quest" }).click();
+
+  const hintGate = deferred();
+  const hintFetched = deferred();
+  await page.route("**/api/progress", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const response = await route.fetch();
+    hintFetched.resolve();
+    await hintGate.promise;
+    await route.fulfill({ response });
+  });
+  await page.getByRole("button", { name: /quest notebook/i }).click();
+  await page.getByRole("tab", { name: "Hints" }).click();
+  await page.getByRole("button", { name: "Reveal a hint" }).click();
+  await hintFetched.promise;
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await setCode(page, path[0].solution.code);
+  await page.getByRole("button", { name: "Submit all" }).click();
+  await expect(page.getByTestId("completion-floating-panel")).toBeVisible();
+  hintGate.resolve();
+  await expect(page.getByTestId("completion-floating-panel")).toBeVisible();
+  await expect(page.getByTestId("completion-floating-panel")).toContainText("+25 XP");
+  await page.unroute("**/api/progress");
+
+  await page.getByRole("button", { name: "Move to next quest" }).click();
+  await setCode(page, path[1].solution.code);
+  const runGate = deferred();
+  const runFetched = deferred();
+  await page.route("**/api/run", async (route) => {
+    const response = await route.fetch();
+    runFetched.resolve();
+    await runGate.promise;
+    await route.fulfill({ response });
+  });
+  await page.getByRole("button", { name: "Submit all" }).click();
+  await runFetched.promise;
+  await page.getByRole("button", { name: "Log out" }).click();
+  runGate.resolve();
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByTestId("completion-floating-panel")).toHaveCount(0);
+  await expect(page.getByText("Race Ranger")).toHaveCount(0);
+});
+
+test("401 cleanup removes profile, help, result, reward and attempt state", async ({ page }) => {
+  await signIn(page, "Expired Ranger");
+  await page.getByRole("button", { name: "Continue Last Quest" }).click();
+  await setCode(page, path[0].solution.code);
+  await page.getByRole("button", { name: "Submit all" }).click();
+  await expect(page.getByTestId("completion-floating-panel")).toBeVisible();
+  await setCode(page, "# invalidate old pass");
+  await page.route("**/api/progress", (route) => route.request().method() === "POST"
+    ? route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "unauthorized" }) })
+    : route.continue());
+  await page.getByRole("button", { name: /quest notebook/i }).click();
+  await page.getByRole("tab", { name: "Hints" }).click();
+  await page.getByRole("button", { name: "Reveal a hint" }).click();
+  await expect(page.getByText("Your session ended. Sign in again to keep going.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByTestId("completion-floating-panel")).toHaveCount(0);
+  await expect(page.getByText("Expired Ranger")).toHaveCount(0);
+  await expect(page.getByText(/25 XP/)).toHaveCount(0);
+});
+
+test("non-JSON gateway failures show retry guidance instead of parser errors", async ({ page }) => {
+  await signIn(page, "Gateway Ranger");
+  await page.getByRole("button", { name: "Continue Last Quest" }).click();
+  await page.route("**/api/run", (route) => route.fulfill({ status: 502, contentType: "text/html", body: "<html>bad gateway</html>" }));
+  await page.getByRole("button", { name: "Run basic" }).click();
+  await expect(page.getByText("The runner returned an unreadable response. Retry in a moment.")).toBeVisible();
+  await expect(page.getByText(/Unexpected token|JSON/i)).toHaveCount(0);
+  await page.unroute("**/api/run");
+  await page.route("**/api/run", (route) => route.fulfill({ status: 503, body: "" }));
+  await page.getByRole("button", { name: "Run basic" }).click();
+  await expect(page.getByText("The runner returned an unreadable response. Retry in a moment.")).toBeVisible();
+});
+
+test("last quest resumes after reload and assisted completion is labeled", async ({ page }) => {
+  await signIn(page, "Resume Ranger");
+  await page.getByRole("button", { name: "Continue Last Quest" }).click();
+  await submitAndAdvance(page, path[0]);
+  await expect(page.getByRole("heading", { name: path[1].title })).toBeVisible();
+  await expect.poll(async () => (await (await page.request.get("/api/progress")).json()).progress.lastChallengeId).toBe(path[1].id);
+  await page.getByRole("button", { name: "Home" }).click();
+  await page.reload();
+  await expect(page.getByText("Signed in as")).toContainText("Resume Ranger");
+  await expect(page.getByRole("button", { name: "Continue Last Quest" })).toContainText(path[1].title);
+  await page.getByRole("button", { name: "Continue Last Quest" }).click();
+  await expect(page.getByRole("heading", { name: path[1].title })).toBeVisible();
+
+  await page.getByRole("button", { name: /quest notebook/i }).click();
+  await page.getByRole("tab", { name: "Solution" }).click();
+  await page.getByRole("button", { name: "I want to view the solution" }).click();
+  await page.getByRole("button", { name: "Reveal solution" }).click();
+  await expect(page.getByText(/Solution revealed/)).toBeVisible();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await setCode(page, path[1].solution.code);
+  await page.getByRole("button", { name: "Submit all" }).click();
+  await expect(page.getByTestId("completion-floating-panel")).toContainText("Solution-assisted clear.");
+});
+
+test("Quest Notebook behaves as a keyboard-contained modal tab interface", async ({ page }) => {
+  await signIn(page, "Keyboard Ranger");
+  await page.getByRole("button", { name: "Continue Last Quest" }).click();
+  const toggle = page.getByRole("button", { name: "Open quest notebook" });
+  await toggle.focus();
+  await toggle.press("Enter");
+  const dialog = page.getByRole("dialog", { name: path[0].title });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await expect(page.locator('section[aria-label="Code editor"]')).toHaveAttribute("inert", "");
+  const question = page.getByRole("tab", { name: "Question" });
+  await expect(question).toBeFocused();
+  await question.press("ArrowRight");
+  const animation = page.getByRole("tab", { name: "Animation" });
+  await expect(animation).toBeFocused();
+  await expect(animation).toHaveAttribute("aria-selected", "true");
+  for (let index = 0; index < 12; index += 1) await page.keyboard.press("Tab");
+  expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open quest notebook" })).toBeFocused();
 });
 
 test("runner boundary fails closed and hides submit fixtures", async ({ request }) => {
