@@ -462,3 +462,9 @@ test("app JSON endpoints reject oversized bodies", async ({ request }) => {
   });
   expect(oversizedProgress.status()).toBe(413);
 });
+
+test("the design style tile is not served by the production build", async ({ page }) => {
+  const response = await page.goto("/styleguide");
+  expect(response?.status()).toBe(404);
+  await expect(page.getByRole("heading", { name: "Quest Coder", level: 1 })).toHaveCount(0);
+});
