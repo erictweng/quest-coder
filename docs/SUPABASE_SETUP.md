@@ -5,16 +5,17 @@ Production uses Supabase Auth for identity and Supabase Postgres for progress. W
 ## 1. Create and configure the project
 
 1. Create a Supabase project.
-2. In **Authentication → URL Configuration**, set the Site URL to the deployed Quest Coder URL.
+2. In **Authentication → URL Configuration**, set the Site URL to the deployed Quest Coder URL (production: `https://quest-coder.vercel.app`; do not use per-deployment `*-<hash>.vercel.app` URLs).
 3. Add redirect URLs for:
    - `https://<production-host>/auth/callback`
    - `http://localhost:3000/auth/callback` for local Supabase testing
 4. Enable email passwordless sign-in. Quest Coder calls `signInWithOtp` and supports both PKCE `code` callbacks and `token_hash` confirmation links.
-5. In **API Settings**, add `quest_coder` to the exposed schemas. The application invokes only service-role RPCs in this schema; the browser does not receive the service-role key.
 
-## 2. Apply the database migration
+## 2. Apply the database migration, then expose the schema
 
-Apply `supabase/migrations/202610020001_quest_coder_auth_progress.sql` through the Supabase CLI or SQL editor. It is idempotent and creates:
+Apply `supabase/migrations/202610020001_quest_coder_auth_progress.sql` through the Supabase CLI or SQL editor **before** exposing the schema: the `quest_coder` schema does not exist until the migration creates it, so it will not appear in the API settings dropdown yet. Then, in **API Settings → Exposed schemas**, add `quest_coder`. The application invokes only service-role RPCs in this schema; the browser does not receive the service-role key. Exposed tables can stay empty.
+
+CI applies this migration twice to real Postgres and exercises the functions, reward idempotency, client-write limits, and RLS (`supabase/tests/`). The migration is idempotent and creates:
 
 - `quest_coder.progress`, keyed by `auth.users.id` UUID with `ON DELETE CASCADE`;
 - RLS with an authenticated read-own-row policy keyed to `auth.uid()`;

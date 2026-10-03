@@ -96,9 +96,36 @@ jobs:
             test-results/
           if-no-files-found: ignore
 
+  supabase-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Apply Supabase stand-ins
+        run: psql -v ON_ERROR_STOP=1 -f supabase/tests/supabase_stubs.sql
+      - name: Apply migration twice (must be idempotent)
+        run: |
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/202610020001_quest_coder_auth_progress.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/202610020001_quest_coder_auth_progress.sql
+      - name: Exercise functions, rewards and RLS
+        run: psql -v ON_ERROR_STOP=1 -f supabase/tests/migration_checks.sql
+
   release-evidence:
-    if: always() && needs.quality-and-runner.result == 'success' && needs.chromium-e2e.result == 'success' && needs.focused-browser-smoke.result == 'success'
-    needs: [quality-and-runner, chromium-e2e, focused-browser-smoke]
+    if: always() && needs.quality-and-runner.result == 'success' && needs.chromium-e2e.result == 'success' && needs.focused-browser-smoke.result == 'success' && needs.supabase-migration.result == 'success'
+    needs: [quality-and-runner, chromium-e2e, focused-browser-smoke, supabase-migration]
     runs-on: ubuntu-latest
     permissions:
       contents: read

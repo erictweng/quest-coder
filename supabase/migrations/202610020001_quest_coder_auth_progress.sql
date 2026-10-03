@@ -259,7 +259,7 @@ declare
   factor numeric;
   xp integer;
   shards integer := coalesce((p_clear->>'shards')::integer, 0);
-  grant jsonb := null;
+  reward_grant jsonb := null;
   grants jsonb;
   review_input jsonb := p_clear->'review';
   pack_slug text;
@@ -280,7 +280,7 @@ begin
                    when hint_count > 0 then coalesce((p_clear->>'hintMultiplier')::numeric, 1)
                    else 1 end;
     xp := greatest(5, round(coalesce((p_clear->>'baseXp')::numeric, 0) * factor)::integer);
-    grant := jsonb_build_object(
+    reward_grant := jsonb_build_object(
       'id', challenge_id || '-first-clear', 'at', to_char(p_now at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
       'challengeId', challenge_id, 'xp', xp, 'shards', shards,
       'reason', case when review_input is not null then 'boss reward grant' else 'quest reward grant' end
@@ -293,7 +293,7 @@ begin
       from (
         select value, ordering
           from (
-            select grant as value, 0::bigint as ordering
+            select reward_grant as value, 0::bigint as ordering
             union all
             select value, ordinality
               from jsonb_array_elements(coalesce(row_payload->'rewards'->'grants', '[]'::jsonb)) with ordinality
@@ -330,7 +330,7 @@ begin
   if changed then row_version := row_version + 1; end if;
   row_payload := jsonb_set(row_payload, '{version}', to_jsonb(row_version), true);
   update quest_coder.progress set payload = row_payload, version = row_version, updated_at = now() where user_id = p_user_id;
-  return jsonb_build_object('progress', row_payload, 'grant', grant);
+  return jsonb_build_object('progress', row_payload, 'grant', reward_grant);
 end;
 $$;
 

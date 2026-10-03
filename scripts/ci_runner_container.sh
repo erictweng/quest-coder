@@ -8,6 +8,12 @@ token="ci-runner-token-not-a-production-secret"
 fixture="$PWD/runner/tests/fixtures/non-production-private-pack.json"
 
 cleanup() {
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "--- runner container logs ---" >&2
+    docker logs "$container" >&2 2>&1 || true
+    docker inspect -f 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$container" >&2 2>&1 || true
+  fi
   docker rm -f "$container" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
 }
@@ -15,8 +21,10 @@ trap cleanup EXIT
 
 docker build -f runner/service/Dockerfile -t "$image" .
 docker network create --internal "$network" >/dev/null
+# Docker does not publish ports for containers on an --internal network, so every
+# HTTP probe below runs inside the container against its own loopback listener.
 docker run -d --name "$container" \
-  --network "$network" -p 127.0.0.1:18787:8787 \
+  --network "$network" \
   --read-only --tmpfs /tmp:size=16m,noexec,nosuid \
   --cap-drop ALL --security-opt no-new-privileges --pids-limit 32 \
   --mount "type=bind,src=$fixture,dst=/run/secrets/quest_coder_private_pack,readonly" \
@@ -25,11 +33,11 @@ docker run -d --name "$container" \
   -e QUEST_CODER_PRIVATE_PACK_PATH=/run/secrets/quest_coder_private_pack \
   "$image" >/dev/null
 
-python3 - <<'PY'
+docker exec -i "$container" python3 - <<'PY'
 import time, urllib.request
 for _ in range(100):
     try:
-        with urllib.request.urlopen('http://127.0.0.1:18787/healthz', timeout=.2) as response:
+        with urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=.2) as response:
             if response.status == 200:
                 break
     except Exception:
@@ -47,9 +55,9 @@ if docker exec "$container" python3 -c 'import socket; socket.create_connection(
   exit 1
 fi
 
-python3 - <<'PY'
+docker exec -i "$container" python3 - <<'PY'
 import json, urllib.error, urllib.request
-url='http://127.0.0.1:18787/v1/runs'
+url='http://127.0.0.1:8787/v1/runs'
 payload={
   'source':'def count_routes(n):\n    return 2 if n == 2 else 8',
   'packSlug':'forest-of-patience-climbing-stairs',
