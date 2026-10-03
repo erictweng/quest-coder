@@ -2,7 +2,8 @@
 # Deploys the Quest Coder Python runner to Google Cloud Run.
 # Run from the repository root in Google Cloud Shell (gcloud is preinstalled and logged in):
 #
-#   gcloud config set project <your-project-id>
+#   gcloud projects list                        # copy the PROJECT_ID column (not the name)
+#   gcloud config set project <project-id>
 #   scripts/deploy_runner_cloud_run.sh
 #
 # Safe to re-run: it reuses existing secrets, and redeploys the current commit.
@@ -23,6 +24,20 @@ RUNNER_SA_NAME="quest-coder-runner"
 
 [ -n "$PROJECT_ID" ] || { echo "Set a project first: gcloud config set project <project-id>" >&2; exit 1; }
 [ -f runner/service/Dockerfile ] || { echo "Run this from the quest-coder repository root." >&2; exit 1; }
+if ! gcloud projects describe "$PROJECT_ID" --format 'value(projectId)' >/dev/null 2>&1; then
+  echo "Project '${PROJECT_ID}' was not found or you cannot access it." >&2
+  echo "Find the PROJECT_ID column with: gcloud projects list" >&2
+  echo "Then run: gcloud config set project <project-id> && $0" >&2
+  exit 1
+fi
+billing_enabled="$(gcloud billing projects describe "$PROJECT_ID" --format 'value(billingEnabled)' 2>/dev/null || true)"
+if [ "$billing_enabled" = "False" ]; then
+  echo "Billing is not enabled on '${PROJECT_ID}'. Cloud Run requires a billing account (usage here should stay in the free tier)." >&2
+  echo "Enable it at https://console.cloud.google.com/billing/linkedaccount?project=${PROJECT_ID} and re-run." >&2
+  exit 1
+elif [ "$billing_enabled" != "True" ]; then
+  echo "Could not confirm billing on '${PROJECT_ID}'; continuing. If enabling APIs fails, link a billing account first." >&2
+fi
 
 RUNNER_SA="${RUNNER_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/runner:$(git rev-parse --short HEAD)"
