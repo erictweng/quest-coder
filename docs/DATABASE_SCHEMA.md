@@ -34,7 +34,10 @@ Server-owned, changed only by a passing submit or a `POST /api/progress` action:
 Client-owned, written by `PUT /api/progress`:
 
 - `savedCode`: `{ [challengeId]: source }`, each at most 24,000 bytes
+- `savedCodeVersions`: optimistic per-challenge draft revisions
 - `attempts`: `{ [challengeId]: attempt[] }`, latest 15 per challenge
+- `lastChallengeId`: the validated challenge to resume across reloads/devices
+- `lastChallengeVersion`: optimistic revision that prevents stale tabs replacing the resume pointer
 - `friendsEnabled`: boolean (no UI at present)
 
 Anything server-owned in a `PUT` body is ignored.

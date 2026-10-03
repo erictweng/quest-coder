@@ -27,10 +27,13 @@ from pathlib import Path
 from types import FrameType
 from typing import Any, Callable, Dict, Iterable, List as PyList, Optional
 
+from runner.bounded_subprocess import OutputLimitExceeded, run_bounded
+
 USER_FILENAME = "<quest-user>"
 WORKER_PATH = Path(__file__).resolve().parent / "case_worker.py"
 WORKER_KILL_GRACE_MS = 500
 MAX_WORKER_OUTPUT_BYTES = 2_000_000
+MAX_WORKER_ERROR_BYTES = 64_000
 # Larger integers cannot be converted to text on CPython 3.11+ and are never a correct answer here.
 MAX_INT_BITS = 4096
 EXECUTION_ERROR_KINDS = {"compile_error", "runtime_error", "loop_guard", "off_end_read"}
@@ -503,23 +506,23 @@ def execute_case_isolated(
     request = json.dumps({"source": source, "inputs": inputs, "entrypoint": entrypoint, "trace": trace, "timeoutMs": timeout_ms, "maxEvents": max_events})
     started = time.time()
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             [sys.executable, str(WORKER_PATH)],
-            input=request,
-            text=True,
-            capture_output=True,
+            input_bytes=request.encode(),
             timeout=(timeout_ms + WORKER_KILL_GRACE_MS) / 1000,
+            stdout_limit=MAX_WORKER_OUTPUT_BYTES,
+            stderr_limit=MAX_WORKER_ERROR_BYTES,
             env={"PATH": "/usr/bin:/bin", "PYTHONSAFEPATH": "1", "PYTHONDONTWRITEBYTECODE": "1"},
         )
     except subprocess.TimeoutExpired:
         return _failed_execution("loop_guard", "execution exceeded wall-time guard", int((time.time() - started) * 1000))
+    except OutputLimitExceeded:
+        return _failed_execution("runtime_error", "execution produced too much output", int((time.time() - started) * 1000))
     duration_ms = int((time.time() - started) * 1000)
     if proc.returncode != 0:
         return _failed_execution("runtime_error", "execution stopped: the program exceeded its memory or CPU limit", duration_ms)
-    if len(proc.stdout) > MAX_WORKER_OUTPUT_BYTES:
-        return _failed_execution("runtime_error", "execution produced too much output", duration_ms)
     try:
-        return _sanitize_execution(json.loads(proc.stdout, parse_constant=_reject_constant))
+        return _sanitize_execution(json.loads(proc.stdout.decode("utf-8"), parse_constant=_reject_constant))
     except (ValueError, TypeError, KeyError):
         return _failed_execution("runtime_error", "execution produced an unreadable result", duration_ms)
 

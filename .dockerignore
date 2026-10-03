@@ -1,0 +1,9 @@
+.git
+.next
+.data
+.private
+node_modules
+playwright-report
+test-results
+runner/packs
+runner/tests

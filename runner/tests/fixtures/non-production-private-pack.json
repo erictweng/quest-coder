@@ -1,0 +1,225 @@
+{
+  "schemaVersion": "quest-private-pack.v1",
+  "fixtureLabel": "NON-PRODUCTION CI/E2E FIXTURE — uses only already-public Run cases",
+  "slug": "forest-of-patience-climbing-stairs",
+  "runtime": {
+    "timeLimitMs": 2000,
+    "timelineEventCap": 3000
+  },
+  "challenges": [
+    {
+      "id": "patience-last-jump",
+      "entrypoint": "count_routes",
+      "budget": {
+        "enabled": false,
+        "unit": "line_step",
+        "failureMode": "hard_fail"
+      },
+      "tests": {
+        "run": [
+          {
+            "id": "two-ledges",
+            "input": {
+              "n": 2
+            },
+            "expected": 2
+          },
+          {
+            "id": "five-ledges",
+            "input": {
+              "n": 5
+            },
+            "expected": 8
+          }
+        ],
+        "submit": [
+          {
+            "id": "two-ledges",
+            "input": {
+              "n": 2
+            },
+            "expected": 2
+          },
+          {
+            "id": "five-ledges",
+            "input": {
+              "n": 5
+            },
+            "expected": 8
+          }
+        ],
+        "replayCaseId": "five-ledges"
+      }
+    },
+    {
+      "id": "patience-route-scroll",
+      "entrypoint": "fill_scroll",
+      "budget": {
+        "enabled": false,
+        "unit": "line_step",
+        "failureMode": "hard_fail"
+      },
+      "tests": {
+        "run": [
+          {
+            "id": "scroll-2",
+            "input": {
+              "n": 2
+            },
+            "expected": [
+              1,
+              1,
+              2
+            ]
+          },
+          {
+            "id": "scroll-5",
+            "input": {
+              "n": 5
+            },
+            "expected": [
+              1,
+              1,
+              2,
+              3,
+              5,
+              8
+            ]
+          }
+        ],
+        "submit": [
+          {
+            "id": "scroll-2",
+            "input": {
+              "n": 2
+            },
+            "expected": [
+              1,
+              1,
+              2
+            ]
+          },
+          {
+            "id": "scroll-5",
+            "input": {
+              "n": 5
+            },
+            "expected": [
+              1,
+              1,
+              2,
+              3,
+              5,
+              8
+            ]
+          }
+        ],
+        "replayCaseId": "scroll-5"
+      }
+    },
+    {
+      "id": "patience-two-slot-pouch",
+      "entrypoint": "next_pair",
+      "budget": {
+        "enabled": false,
+        "unit": "line_step",
+        "failureMode": "hard_fail"
+      },
+      "tests": {
+        "run": [
+          {
+            "id": "ground-to-one",
+            "input": {
+              "a": 1,
+              "b": 1
+            },
+            "expected": [
+              1,
+              2
+            ]
+          },
+          {
+            "id": "two-to-three",
+            "input": {
+              "a": 2,
+              "b": 3
+            },
+            "expected": [
+              3,
+              5
+            ]
+          }
+        ],
+        "submit": [
+          {
+            "id": "ground-to-one",
+            "input": {
+              "a": 1,
+              "b": 1
+            },
+            "expected": [
+              1,
+              2
+            ]
+          },
+          {
+            "id": "two-to-three",
+            "input": {
+              "a": 2,
+              "b": 3
+            },
+            "expected": [
+              3,
+              5
+            ]
+          }
+        ],
+        "replayCaseId": "two-to-three"
+      }
+    },
+    {
+      "id": "boss-old-bramblehorn",
+      "entrypoint": "Solution().climbStairs",
+      "budget": {
+        "enabled": false,
+        "unit": "line_step",
+        "failureMode": "hard_fail"
+      },
+      "tests": {
+        "run": [
+          {
+            "id": "boss-2",
+            "input": {
+              "n": 2
+            },
+            "expected": 2
+          },
+          {
+            "id": "boss-5",
+            "input": {
+              "n": 5
+            },
+            "expected": 8
+          }
+        ],
+        "submit": [
+          {
+            "id": "boss-2",
+            "input": {
+              "n": 2
+            },
+            "expected": 2
+          },
+          {
+            "id": "boss-5",
+            "input": {
+              "n": 5
+            },
+            "expected": 8
+          }
+        ],
+        "replayCaseId": "boss-5"
+      }
+    }
+  ]
+}

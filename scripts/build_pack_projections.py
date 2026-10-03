@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Generate the Next.js projections of each runner pack.
+"""Generate browser-safe projections from tracked server content.
 
-`runner/packs/<slug>.json` is the single source of truth and the only place
-hidden submit tests live. Two projections are derived from it:
+`content/server/<slug>.json` is the tracked source for public content. It keeps
+server-released solution and hint text plus public Run/replay cases, but never
+contains private Submit fixtures. `content/public/<slug>.json` removes solution
+and hint text before browser bundling.
 
-- `content/server/<slug>.json`: read by the Next.js server. Hidden tests are
-  removed; solutions and hint text stay so the server can reveal them.
-- `content/public/<slug>.json`: bundled into the browser. Additionally drops
-  solutions and hint text, which the server hands out on request.
-
-Run with `--check` to fail when the committed projections are stale.
+Private grading packs are mounted only by the runner and are deliberately not an
+input to this script. Run with `--check` to fail when public projections are stale.
 """
 from __future__ import annotations
 
@@ -20,28 +18,28 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIR = ROOT / "runner" / "packs"
 SERVER_DIR = ROOT / "content" / "server"
 PUBLIC_DIR = ROOT / "content" / "public"
-HIDDEN_TEST_KEYS = ("submit", "fixed", "replayCaseIds", "random")
+PRIVATE_TEST_KEYS = ("submit", "fixed", "replayCaseIds", "random")
 
 
 def challenges(pack: dict[str, Any]) -> list[dict[str, Any]]:
     return [*pack.get("quests", []), pack["boss"]]
 
 
-def server_projection(pack: dict[str, Any]) -> dict[str, Any]:
-    projected = copy.deepcopy(pack)
-    for challenge in challenges(projected):
-        for key in HIDDEN_TEST_KEYS:
-            challenge.get("tests", {}).pop(key, None)
-    for variant in projected.get("review", {}).get("variants", []):
-        variant.pop("tests", None)
-    return projected
+def validate_server_source(pack: dict[str, Any], source: Path) -> None:
+    for challenge in challenges(pack):
+        tests = challenge.get("tests", {})
+        leaked = [key for key in PRIVATE_TEST_KEYS if key in tests]
+        if leaked:
+            raise ValueError(f"{source.relative_to(ROOT)} contains private test keys: {', '.join(leaked)}")
+    for variant in pack.get("review", {}).get("variants", []):
+        if "tests" in variant:
+            raise ValueError(f"{source.relative_to(ROOT)} contains private review tests")
 
 
 def public_projection(pack: dict[str, Any]) -> dict[str, Any]:
-    projected = server_projection(pack)
+    projected = copy.deepcopy(pack)
     for challenge in challenges(projected):
         challenge.pop("solution", None)
         challenge["hints"] = [{key: value for key, value in hint.items() if key != "text"} for hint in challenge.get("hints", [])]
@@ -55,21 +53,31 @@ def render(pack: dict[str, Any]) -> str:
 def main() -> int:
     check = "--check" in sys.argv[1:]
     stale: list[str] = []
-    for source in sorted(SOURCE_DIR.glob("*.json")):
+    sources = sorted(SERVER_DIR.glob("*.json"))
+    expected_names = {source.name for source in sources}
+    for source in sources:
         pack = json.loads(source.read_text())
-        for directory, projection in ((SERVER_DIR, server_projection), (PUBLIC_DIR, public_projection)):
-            target = directory / source.name
-            expected = render(projection(pack))
-            if target.exists() and target.read_text() == expected:
-                continue
-            if check:
-                stale.append(str(target.relative_to(ROOT)))
-            else:
-                directory.mkdir(parents=True, exist_ok=True)
-                target.write_text(expected)
-                print(f"wrote {target.relative_to(ROOT)}")
+        validate_server_source(pack, source)
+        target = PUBLIC_DIR / source.name
+        expected = render(public_projection(pack))
+        if target.exists() and target.read_text() == expected:
+            continue
+        if check:
+            stale.append(str(target.relative_to(ROOT)))
+        else:
+            PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+            target.write_text(expected)
+            print(f"wrote {target.relative_to(ROOT)}")
+    extras = sorted(path for path in PUBLIC_DIR.glob("*.json") if path.name not in expected_names)
+    if extras:
+        if check:
+            stale.extend(str(path.relative_to(ROOT)) for path in extras)
+        else:
+            for path in extras:
+                path.unlink()
+                print(f"removed {path.relative_to(ROOT)}")
     if stale:
-        print("stale pack projections (run scripts/build_pack_projections.py): " + ", ".join(stale), file=sys.stderr)
+        print("stale public pack projections (run scripts/build_pack_projections.py): " + ", ".join(stale), file=sys.stderr)
         return 1
     return 0
 

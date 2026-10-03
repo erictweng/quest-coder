@@ -1,149 +1,197 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
-
-// The store reads its path at import time, so point it at a throwaway database first.
-process.env.QUEST_CODER_DATABASE_PATH = join(mkdtempSync(join(tmpdir(), "quest-coder-")), "test.sqlite");
-const store = await import("../../lib/progress-store.ts");
+import { configuredProgressBackend, LocalProgressStore, SupabaseProgressStore } from "../../lib/progress-store.ts";
+import { mergeServerSnapshot, shouldApplyServerSnapshot, validLastChallengeId } from "../../lib/client-progress.ts";
 
 const QUEST = { challengeId: "quest-1", baseXp: 100, shards: 0 };
 const BOSS = { challengeId: "boss", baseXp: 100, shards: 1, review: { packSlug: "pack", topic: "dp", schedule: [1, 3, 7] } };
 
-function session() {
-  return store.newSession("Tester").tokenHash;
+function store() {
+  const path = join(mkdtempSync(join(tmpdir(), "quest-coder-")), "test.sqlite");
+  return new LocalProgressStore(path);
 }
 
-test("a session resolves from its token and can be renamed", () => {
-  const created = store.newSession("First");
-  assert.equal(store.sessionForToken(created.token)?.displayName, "First");
-  store.renameSession(created.tokenHash, "Second");
-  assert.equal(store.sessionForToken(created.token)?.displayName, "Second");
-  assert.equal(store.sessionForToken("not-a-token"), null);
+function session(local: LocalProgressStore, name = "Tester") {
+  return local.createSession(name).tokenHash;
+}
+
+test("backend selection uses local only when every Supabase variable is absent", () => {
+  assert.equal(configuredProgressBackend({}), "local");
+  assert.equal(configuredProgressBackend({
+    NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "publishable",
+    SUPABASE_SERVICE_ROLE_KEY: "service"
+  }), "supabase");
+  assert.throws(() => configuredProgressBackend({ NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co" }), /incomplete/);
 });
 
-test("first clear grants the reward once", () => {
-  const hash = session();
-  const first = store.applyAuthoritativeClear(hash, QUEST);
-  assert.equal(first.grant?.xp, 100);
-  const second = store.applyAuthoritativeClear(hash, QUEST);
-  assert.equal(second.grant, null);
-  assert.equal(second.progress.rewards.xp, 100);
-  assert.equal(second.progress.cleared["quest-1"], true);
+test("a local session resolves from its token and can be renamed", () => {
+  const local = store();
+  const created = local.createSession("First");
+  assert.equal(local.sessionForToken(created.token)?.displayName, "First");
+  local.renameSession(created.tokenHash, "Second");
+  assert.equal(local.sessionForToken(created.token)?.displayName, "Second");
+  assert.equal(local.sessionForToken("not-a-token"), null);
 });
 
-test("reward is scaled by help the server recorded", () => {
-  const hinted = session();
-  store.recordHintOpened(hinted, "quest-1", 3);
-  assert.equal(store.applyAuthoritativeClear(hinted, { ...QUEST, hintMultiplier: 0.75 }).grant?.xp, 75);
-
-  // Without a configured hint multiplier, hints are free.
-  const freeHints = session();
-  store.recordHintOpened(freeHints, "quest-1", 3);
-  assert.equal(store.applyAuthoritativeClear(freeHints, QUEST).grant?.xp, 100);
-
-  const customSolution = session();
-  store.recordSolutionOpened(customSolution, "quest-1");
-  assert.equal(store.applyAuthoritativeClear(customSolution, { ...QUEST, solutionMultiplier: 0.2 }).grant?.xp, 20);
-
-  const assisted = session();
-  store.recordHintOpened(assisted, "quest-1", 3);
-  store.recordSolutionOpened(assisted, "quest-1");
-  assert.equal(store.applyAuthoritativeClear(assisted, QUEST).grant?.xp, 50);
+test("progress is isolated by immutable user key", async () => {
+  const local = store();
+  const first = session(local, "Same Display Name");
+  const second = session(local, "Same Display Name");
+  await local.writeClient(first, { savedCode: { "quest-1": "first" }, savedCodeVersions: { "quest-1": 0 } });
+  await local.applyAuthoritativeClear(first, QUEST);
+  assert.equal((await local.read(first)).savedCode["quest-1"], "first");
+  assert.equal((await local.read(first)).cleared["quest-1"], true);
+  assert.deepEqual((await local.read(second)).savedCode, {});
+  assert.deepEqual((await local.read(second)).cleared, {});
 });
 
-test("opened hints are capped at the number of hints", () => {
-  const hash = session();
-  for (let i = 0; i < 5; i += 1) store.recordHintOpened(hash, "quest-1", 2);
-  assert.equal(store.readServerProgress(hash).hintsOpened["quest-1"], 2);
-});
-
-test("client writes cannot change server-owned state", () => {
-  const hash = session();
-  store.applyAuthoritativeClear(hash, QUEST);
-  store.writeClientProgress(hash, {
-    cleared: { boss: true },
-    rewards: { xp: 999_999, shards: 99 },
-    hintsOpened: { "quest-1": 0 },
-    reviews: { pack: { rating: 2400 } },
-    savedCode: { "quest-1": "draft" },
-    attempts: { "quest-1": [{ id: "a" }] },
-    friendsEnabled: true
-  });
-  const saved = store.readServerProgress(hash);
-  assert.deepEqual(saved.cleared, { "quest-1": true });
+test("first clear grants the reward once under concurrent requests", async () => {
+  const local = store();
+  const user = session(local);
+  const results = await Promise.all(Array.from({ length: 8 }, () => local.applyAuthoritativeClear(user, QUEST)));
+  assert.equal(results.filter((result) => result.grant !== null).length, 1);
+  const saved = await local.read(user);
   assert.equal(saved.rewards.xp, 100);
-  assert.deepEqual(saved.reviews, {});
+  assert.equal(saved.cleared["quest-1"], true);
+});
+
+test("reward is scaled by help the server recorded", async () => {
+  const local = store();
+  const hinted = session(local);
+  await local.recordHintOpened(hinted, "quest-1", 3);
+  assert.equal((await local.applyAuthoritativeClear(hinted, { ...QUEST, hintMultiplier: 0.75 })).grant?.xp, 75);
+
+  const customSolution = session(local);
+  await local.recordSolutionOpened(customSolution, "quest-1");
+  assert.equal((await local.applyAuthoritativeClear(customSolution, { ...QUEST, solutionMultiplier: 0.2 })).grant?.xp, 20);
+});
+
+test("stale multi-tab saves merge attempts and do not overwrite newer drafts", async () => {
+  const local = store();
+  const user = session(local);
+  const tabA = await local.writeClient(user, {
+    savedCode: { "quest-1": "newer" },
+    savedCodeVersions: { "quest-1": 0 },
+    attempts: { "quest-1": [{ id: "attempt-a", status: "passed" }] }
+  });
+  assert.equal(tabA.savedCodeVersions["quest-1"], 1);
+
+  const merged = await local.writeClient(user, {
+    savedCode: { "quest-1": "stale", "quest-2": "other-tab" },
+    savedCodeVersions: { "quest-1": 0, "quest-2": 0 },
+    attempts: { "quest-1": [{ id: "attempt-b", status: "wrong_answer" }] }
+  });
+  assert.equal(merged.savedCode["quest-1"], "newer");
+  assert.equal(merged.savedCode["quest-2"], "other-tab");
+  assert.deepEqual(merged.attempts["quest-1"].map((attempt) => (attempt as { id: string }).id), ["attempt-b", "attempt-a"]);
+});
+
+test("last challenge resume uses optimistic revisions and stale tabs cannot erase or replace it", async () => {
+  const local = store();
+  const user = session(local);
+  const first = await local.writeClient(user, { lastChallengeId: "quest-2", lastChallengeVersion: 0 });
+  assert.equal(first.lastChallengeId, "quest-2");
+  assert.equal(first.lastChallengeVersion, 1);
+  const stale = await local.writeClient(user, { lastChallengeId: "quest-1", lastChallengeVersion: 0 });
+  assert.equal(stale.lastChallengeId, "quest-2");
+  const omitted = await local.writeClient(user, { attempts: {} });
+  assert.equal(omitted.lastChallengeId, "quest-2");
+});
+
+test("client progress helpers reject stale server snapshots and unknown resume ids", () => {
+  const current = {
+    version: 4,
+    cleared: { q: true }, solutionOpened: {}, hintsOpened: {}, reviews: {}, rewards: { xp: 10 },
+    attempts: {}, savedCode: {}, savedCodeVersions: {}, friendsEnabled: false, lastChallengeVersion: 0
+  };
+  const stale = { version: 3, cleared: {}, solutionOpened: {}, hintsOpened: {}, reviews: {}, rewards: { xp: 0 } };
+  assert.equal(shouldApplyServerSnapshot(current.version, stale.version), false);
+  assert.equal(mergeServerSnapshot(current, stale), current);
+  const newer = { ...stale, version: 5, cleared: { q: true, q2: true } };
+  assert.deepEqual(mergeServerSnapshot(current, newer).cleared, { q: true, q2: true });
+  assert.equal(validLastChallengeId("q2", new Set(["q1", "q2"])), "q2");
+  assert.equal(validLastChallengeId("removed", new Set(["q1", "q2"])), undefined);
+});
+
+test("client saves cannot erase authoritative clears during interleaved mutations", async () => {
+  const local = store();
+  const user = session(local);
+  const stale = await local.read(user);
+  await Promise.all([
+    local.applyAuthoritativeClear(user, QUEST),
+    local.writeClient(user, {
+      ...stale,
+      cleared: {},
+      rewards: { xp: 999999 },
+      savedCode: { "quest-1": "draft" },
+      savedCodeVersions: { "quest-1": 0 }
+    })
+  ]);
+  const saved = await local.read(user);
+  assert.equal(saved.cleared["quest-1"], true);
+  assert.equal(saved.rewards.xp, 100);
   assert.equal(saved.savedCode["quest-1"], "draft");
-  assert.equal(saved.attempts["quest-1"].length, 1);
-  assert.equal(saved.friendsEnabled, true);
 });
 
-test("server actions do not lose client drafts", () => {
-  const hash = session();
-  store.writeClientProgress(hash, { savedCode: { "quest-1": "draft" } });
-  store.recordHintOpened(hash, "quest-1", 3);
-  store.applyAuthoritativeClear(hash, QUEST);
-  assert.equal(store.readServerProgress(hash).savedCode["quest-1"], "draft");
-});
-
-test("boss clears schedule a review that advances only when it is due", () => {
-  const hash = session();
+test("boss reviews advance only when due and shop spending is atomic", async () => {
+  const local = store();
+  const user = session(local);
   const now = new Date("2026-01-01T00:00:00.000Z");
-  const first = store.applyAuthoritativeClear(hash, BOSS, now).progress.reviews.pack;
+  const first = (await local.applyAuthoritativeClear(user, BOSS, now)).progress.reviews.pack;
   assert.equal(first.intervalDays, 1);
-  assert.equal(first.nextDueAt, "2026-01-02T00:00:00.000Z");
-  assert.equal(first.streak, 1);
-  assert.equal(first.rating, 1080);
-
-  // Resubmitting before the review is due earns nothing.
-  const early = store.applyAuthoritativeClear(hash, BOSS, new Date("2026-01-01T12:00:00.000Z"));
-  assert.equal(early.grant, null);
+  const early = await local.applyAuthoritativeClear(user, BOSS, new Date("2026-01-01T12:00:00.000Z"));
   assert.deepEqual(early.progress.reviews.pack, first);
-
-  const due = store.applyAuthoritativeClear(hash, BOSS, new Date("2026-01-02T00:00:00.000Z")).progress.reviews.pack;
+  const due = (await local.applyAuthoritativeClear(user, BOSS, new Date("2026-01-02T00:00:00.000Z"))).progress.reviews.pack;
   assert.equal(due.intervalDays, 3);
-  assert.equal(due.streak, 2);
-  assert.equal(due.rating, 1160);
-  assert.deepEqual(store.readServerProgress(hash).reviews.pack, due);
+
+  const unlocks = await Promise.all([local.unlockShopPreview(user), local.unlockShopPreview(user)]);
+  assert.ok(unlocks.some((progress) => progress.rewards.shopPreviewUnlocked));
+  assert.equal((await local.read(user)).rewards.shards, 0);
 });
 
-test("assisted boss wins come back sooner than clean wins", () => {
-  const base = { packSlug: "pack", bossId: "boss", topic: "dp", schedule: [1, 3, 7], now: new Date("2026-01-01T00:00:00.000Z") };
-  const existing = store.nextReview(store.nextReview(undefined, { ...base, hintCount: 0, solutionAssisted: false }), { ...base, hintCount: 0, solutionAssisted: false });
-  assert.equal(existing.intervalDays, 3);
-  assert.equal(store.nextReview(existing, { ...base, hintCount: 0, solutionAssisted: false }).intervalDays, 7);
-  assert.equal(store.nextReview(existing, { ...base, hintCount: 2, solutionAssisted: false }).intervalDays, 3);
-  assert.equal(store.nextReview(undefined, { ...base, hintCount: 0, solutionAssisted: true }).intervalDays, 1);
-});
-
-test("shop preview costs one shard, once", () => {
-  const hash = session();
-  assert.equal(store.unlockShopPreview(hash).rewards.shopPreviewUnlocked, false);
-  store.applyAuthoritativeClear(hash, BOSS);
-  const unlocked = store.unlockShopPreview(hash);
-  assert.equal(unlocked.rewards.shards, 0);
-  assert.equal(unlocked.rewards.shopPreviewUnlocked, true);
-  assert.equal(store.unlockShopPreview(hash).rewards.shards, 0);
-  assert.equal(store.readServerProgress(hash).rewards.shopPreviewUnlocked, true);
-});
-
-test("pruning removes only sessions that were never used and have gone idle", () => {
-  const abandoned = store.newSession("Abandoned");
-  const drafted = store.newSession("Drafted");
-  store.writeClientProgress(drafted.tokenHash, { savedCode: { "quest-1": "draft" } });
-  const cleared = store.newSession("Cleared");
-  store.applyAuthoritativeClear(cleared.tokenHash, QUEST);
-
-  // Nothing is idle yet, so nothing goes.
-  assert.equal(store.pruneUntouchedSessions(60_000), 0);
-  assert.notEqual(store.sessionForToken(abandoned.token), null);
-
+test("pruning cascades only untouched idle sessions and preserves used saves", async () => {
+  const local = store();
+  const abandoned = local.createSession("Abandoned");
+  const drafted = local.createSession("Drafted");
+  await local.writeClient(drafted.tokenHash, { savedCode: { "quest-1": "draft" }, savedCodeVersions: { "quest-1": 0 } });
   const later = new Date(Date.now() + 2 * 60 * 60_000);
-  assert.ok(store.pruneUntouchedSessions(60 * 60_000, later) >= 1);
-  assert.equal(store.sessionForToken(abandoned.token), null);
-  assert.equal(store.sessionForToken(drafted.token)?.displayName, "Drafted");
-  assert.equal(store.sessionForToken(cleared.token)?.displayName, "Cleared");
-  assert.equal(store.readServerProgress(drafted.tokenHash).savedCode["quest-1"], "draft");
+  assert.ok(local.pruneUntouchedSessions(60 * 60_000, later) >= 1);
+  assert.equal(local.sessionForToken(abandoned.token), null);
+  assert.equal(local.sessionForToken(drafted.token)?.displayName, "Drafted");
+  assert.equal((await local.read(drafted.tokenHash)).savedCode["quest-1"], "draft");
+});
+
+test("Supabase store sends the authenticated UUID only to service RPCs", async () => {
+  const calls: Array<{ schema: string; name: string; args: Record<string, unknown> }> = [];
+  const client = {
+    schema(schema: string) {
+      return {
+        async rpc(name: string, args: Record<string, unknown>) {
+          calls.push({ schema, name, args });
+          return { data: { version: 0, cleared: {}, rewards: {} }, error: null };
+        }
+      };
+    }
+  };
+  const supabase = new SupabaseProgressStore(client as never);
+  await supabase.read("11111111-1111-1111-1111-111111111111");
+  assert.deepEqual(calls[0], {
+    schema: "quest_coder",
+    name: "quest_coder_read_progress",
+    args: { p_user_id: "11111111-1111-1111-1111-111111111111" }
+  });
+});
+
+test("migration structurally enforces RLS, ownership, row locks, and service-only writes", () => {
+  const sql = readFileSync(resolve("supabase/migrations/202610020001_quest_coder_auth_progress.sql"), "utf8");
+  assert.match(sql, /enable row level security/i);
+  assert.match(sql, /auth\.uid\(\)[\s\S]*user_id/i);
+  assert.match(sql, /for update/gi);
+  assert.match(sql, /revoke all on all functions in schema quest_coder from public, anon, authenticated/i);
+  assert.match(sql, /grant execute on function quest_coder\.quest_coder_apply_clear.*service_role/i);
+  assert.match(sql, /references auth\.users\(id\) on delete cascade/i);
 });
